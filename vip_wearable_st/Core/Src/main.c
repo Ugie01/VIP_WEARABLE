@@ -52,6 +52,11 @@ DRV2605L_t Haptic_L;
 DRV2605L_t Haptic_R;
 EBIMU_t Heading;
 
+uint8_t rx_buffer[6];       // 라파로부터 받을 6바이트 수신 버퍼
+uint8_t system_active_flag = 0; // 0: 대기(Sleep), 1: 구동(Active)
+uint32_t last_uart_tx_tick = 0;
+
+float app_angle_error = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -142,48 +147,55 @@ int main(void)
 
     uint32_t last_haptic_tick = HAL_GetTick();
     uint32_t last_log_tick = HAL_GetTick();
+
+    HAL_UART_Receive_IT(&huart6, rx_buffer, 6);
     /* USER CODE END 2 */
 
     /* Infinite loop */
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-        // 파싱 함수는 딜레이 없이 상시 호출하여 백그라운드 DMA 버퍼 데이터를 최신화
-        EBIMU_Get_Euler_Angle(&Heading);
-
-        // 하이퍼파라미터 주기(HAPTIC_UPDATE_PERIOD = 50ms) 마다 햅틱 피드백 연동
-        if (HAL_GetTick() - last_haptic_tick >= HAPTIC_UPDATE_PERIOD)
+        // 💡 [교정 팩트]: BLE 연결 상태 플래그에 따른 최상위 흐름 분기 통제
+        if (system_active_flag == 1)
         {
-            if (FallDetection_Update(&Heading))
+            // 1. 구동 상태일 때만 백그라운드 DMA 버퍼 데이터에서 오일러 각도 실시간 해독
+            EBIMU_Get_Euler_Angle(&Heading);
+
+            // 2. 하이퍼파라미터 주기(HAPTIC_UPDATE_PERIOD = 50ms) 마다 낙상 검사 및 가변 햅틱 제어
+            if (HAL_GetTick() - last_haptic_tick >= HAPTIC_UPDATE_PERIOD)
             {
-//                DRV2605L_UpdateHapticFeedback(&Haptic_L, &Haptic_R, 30);
-//            }
-//            else
-//            {
-//                // 정상 파싱된 Yaw 데이터를 제어 입력 값으로 전달
-//                int16_t current_yaw = (int16_t) Heading.yaw;
-//                DRV2605L_UpdateHapticFeedback(&Haptic_L, &Haptic_R, current_yaw);
+                last_haptic_tick = HAL_GetTick(); // 타임스탬프 갱신
+
+                if (FallDetection_Update(&Heading))
+                {
+                    // 낙상 감지 비상 상황 시 양쪽 모터 고정 강력 경보 진동 (세기: 50)
+                    DRV2605L_UpdateHapticFeedback(&Haptic_L, &Haptic_R, 50);
+                } else
+                {
+                    // 🚀 [연동]: 라파로부터 가로챈 앱의 실제 경로 편차 오차 값에 기반하여
+                    // 좌우 모터 실시간 RTP 세기 가변 분기 제어 실행
+                    DRV2605L_UpdateHapticFeedback(&Haptic_L, &Haptic_R, (int16_t) app_angle_error);
+                }
             }
 
-            last_haptic_tick = HAL_GetTick(); // 타임스탬프 갱신
+            // 3. 라즈베리파이로 100ms 마다 최신 수집된 Yaw 방위각 실시간 송출
+            if (HAL_GetTick() - last_log_tick >= 100)
+            {
+                last_log_tick = HAL_GetTick();
 
-        }
+                printf("\r\nEuler | %.2f, %.2f, %.2f\r\n", Heading.roll, Heading.pitch, Heading.yaw);
 
-        // 디버깅 로그 출력 주기는 햅틱 주기와 분리하여 느리게 설정
-        if (HAL_GetTick() - last_log_tick >= 100)
+                uint8_t tx_packet[5];
+                tx_packet[0] = 0xAA; // 약속된 규격 헤더 주입
+                memcpy(&tx_packet[1], &Heading.yaw, sizeof(float));
+
+                HAL_UART_Transmit(&huart6, tx_packet, 5, 10);
+            }
+        } else
         {
-            printf("\r\nEuler | %.2f, %.2f, %.2f\r\n", Heading.roll, Heading.pitch, Heading.yaw);
-            // 1. 프로토콜 버퍼 선언 (헤더 1B + 데이터 4B = 총 5바이트)
-            uint8_t tx_packet[5];
-            tx_packet[0] = 0xAA; // 파이썬과 약속한 규격 헤더 주입
-
-            memcpy(&tx_packet[1], &Heading.yaw, sizeof(float));
-
-            // 3. 넌블로킹 인터럽트 또는 폴링 방식으로 라파 전송 (타임아웃 10ms 가드)
-            // &huart1 자리에 실제 라파와 연결된 UART 핸들러 변수를 넣으세요.
-            HAL_UART_Transmit(&huart6, tx_packet, 5, 10);
-
-            last_log_tick = HAL_GetTick();
+            // 🛑 [대기동작 팩트]: BLE 미연결 시 센서들한테 값도 안 받고 안 주며 초저전력 대기
+            // (CPU 점유를 낮추고 인터럽트 수신 대기 상태 유지)
+            HAL_Delay(10);
         }
         /* USER CODE END WHILE */
 
@@ -245,6 +257,40 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     if (huart->Instance == USART1)
     {
 
+    } else if (huart->Instance == USART6) // UART6 포트로부터 6바이트 유입 완료 시
+    {
+        // 1. 프로토콜 헤더 0xAA 검증 가드
+        if (rx_buffer[0] == 0xAA)
+        {
+            uint8_t cmd_flag = rx_buffer[5]; // 맨 마지막 6번째 바이트(상태 플래그) 추출
+
+            if (cmd_flag == 0x01)
+            {
+                system_active_flag = 1; // 🚀 앱 연결됨 -> ST 보드 구동 모드 전환
+            } else if (cmd_flag == 0x00)
+            {
+                system_active_flag = 0; // 🛑 앱 연결 끊김 -> ST 보드 대기/초기화 모드 전환
+
+                // 대기 동작 진입 시 안전을 위해 진동 모터 드라이버 출력을 완전히 차단합니다.
+                app_angle_error = 0.0f;
+                DRV2605L_UpdateHapticFeedback(&Haptic_L, &Haptic_R, 0);
+            }
+
+            // 2. 💡 [가이드 연동 추가]: 구동 중일 때, 라파를 거쳐 들어오는
+            // 4바이트 실시간 경로 오차(Float) 데이터를 추출하여 내부 제어 변수에 동기화 수용
+            if (system_active_flag == 1)
+            {
+                // 빅엔디안 구조의 패킷 실수 복원 연산 수행 (라파 전송 포맷과 1:1 디코드 매칭)
+                uint32_t temp_bits = ((uint32_t) rx_buffer[1] << 24) | ((uint32_t) rx_buffer[2] << 16)
+                        | ((uint32_t) rx_buffer[3] << 8) | ((uint32_t) rx_buffer[4]);
+
+                // 비트 재매핑을 통해 순수 float 자료형 변수로 메모리 캐스팅 복원
+                memcpy(&app_angle_error, &temp_bits, sizeof(float));
+            }
+        }
+
+        // 3. 중요: 다음 패킷을 연속적으로 가로채기 위해 수신 인터럽트를 재점화합니다.
+        HAL_UART_Receive_IT(&huart6, rx_buffer, 6);
     }
 }
 

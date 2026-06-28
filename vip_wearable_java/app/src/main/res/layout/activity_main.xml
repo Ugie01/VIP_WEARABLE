@@ -13,7 +13,15 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:orientation="vertical" />
-
+    <ImageView
+        android:id="@+id/iv_custom_user_marker"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
     <LinearLayout
         android:id="@+id/search_bar"
         android:layout_width="match_parent"
@@ -58,6 +66,15 @@
             android:src="@android:drawable/stat_sys_data_bluetooth"
             android:background="@android:color/transparent"
             android:contentDescription="BLE 스캔" />
+
+        <ImageButton
+            android:id="@+id/btn_ble_disconnect"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:src="@android:drawable/ic_menu_delete"
+            android:background="@android:color/transparent"
+            android:visibility="gone"
+            android:contentDescription="BLE 연결 끊기" />
 
         <ImageButton
             android:id="@+id/btn_search"

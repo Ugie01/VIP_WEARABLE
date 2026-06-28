@@ -17,6 +17,7 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -33,12 +34,12 @@ import com.example.vip_wearable_java.services.TmapService;
 import com.example.vip_wearable_java.viewmodels.MapViewModel;
 import com.skt.tmap.TMapView;
 import com.skt.tmap.TMapPoint;
-import com.skt.tmap.overlay.TMapMarkerItem;
 import com.skt.tmap.overlay.TMapPolyLine;
 import com.example.vip_wearable_java.BuildConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
 public class MainActivity extends AppCompatActivity implements LocationListener, TMapView.OnMapReadyListener {
 
     private static final String TAG = "TMAP_DEBUG";
@@ -49,22 +50,34 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
     private TextView tvYawStatus, tvNavigationMsg;
     private LocationManager locationManager;
     private ImageButton btnCancel;
-    private TMapMarkerItem userMarker;
+
+    // 🔥 하드웨어 가속 컴포넌트 마커 정의
+    private ImageView ivCustomUserMarker;
 
     private boolean isMapReady = false;
     private boolean isInitialLocationSet = false;
-    private boolean isMarkerAddedToMap = false;
     private boolean isGuiding = false;
-
-    private Bitmap defaultArrowBitmap = null;
 
     private final ArrayList<BluetoothDevice> scannedBleDevices = new ArrayList<>();
     private ArrayAdapter<String> bleDeviceListAdapter;
+    private ImageButton btnBleDisconnect;
+
+    // 꼬임 방지 연산용 글로벌 상태 변수
+    private float mLatestCalculatedAngle = 0f;
+    private boolean mIsFirstAngleSync = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // ⚠️ [튕김 예방 핵심 1단계] setContentView 직후에 이미지 뷰 레이어 주입 완료
+        ivCustomUserMarker = findViewById(R.id.iv_custom_user_marker);
+
+        // ⚠️ [튕김 예방 핵심 2단계] 넣어주신 arrow.png 이미지를 이미지 뷰에 다이렉트 바인딩
+        if (ivCustomUserMarker != null) {
+            ivCustomUserMarker.setImageResource(R.drawable.arrow);
+        }
 
         viewModel = new ViewModelProvider(this).get(MapViewModel.class);
 
@@ -85,8 +98,9 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         ImageButton btnSearch = findViewById(R.id.btn_search);
         btnCancel = findViewById(R.id.btn_cancel);
         ImageButton btnSettings = findViewById(R.id.btn_settings);
-
+        btnBleDisconnect = findViewById(R.id.btn_ble_disconnect);
         ImageButton btnBleScan = findViewById(R.id.btn_ble_scan);
+
         if (btnBleScan != null) {
             btnBleScan.setOnClickListener(v -> showBleScanDialog());
         }
@@ -116,12 +130,10 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                 }
             }
 
-            // 💡 [린트 경고 우회 해결책] 외부에서 접근 시 에러가 튀지 않도록 어노테이션으로 명시적 권한 검증 흐름 처리 생략 명령 주입
             @android.annotation.SuppressLint("MissingPermission")
             @Override
             public void onDeviceFound(BluetoothDevice device) {
                 runOnUiThread(() -> {
-                    // 내부에서 기기 권한 유효성을 컴파일러가 신뢰하도록 보정하여 크래시 차단
                     if (!scannedBleDevices.contains(device) && device.getName() != null) {
                         scannedBleDevices.add(device);
                         bleDeviceListAdapter.add(device.getName() + "\n(" + device.getAddress() + ")");
@@ -138,6 +150,8 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                 tvYawStatus.setBackgroundColor(Color.parseColor("#4CAF50"));
                 tvYawStatus.setTextColor(Color.WHITE);
                 tvYawStatus.setText("기기 BLE 연결됨");
+                if(btnBleScan != null) btnBleScan.setVisibility(View.GONE);
+                if(btnBleDisconnect != null) btnBleDisconnect.setVisibility(View.VISIBLE);
             } else if (state == 1) {
                 tvYawStatus.setBackgroundColor(Color.parseColor("#FFC107"));
                 tvYawStatus.setTextColor(Color.BLACK);
@@ -146,22 +160,46 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                 tvYawStatus.setBackgroundColor(Color.parseColor("#F44336"));
                 tvYawStatus.setTextColor(Color.WHITE);
                 tvYawStatus.setText("기기 BLE 연결 안됨 (터치하여 스캔)");
+                if(btnBleScan != null) btnBleScan.setVisibility(View.VISIBLE);
+                if(btnBleDisconnect != null) btnBleDisconnect.setVisibility(View.GONE);
             }
         });
 
         tvYawStatus.setOnClickListener(v -> showBleScanDialog());
 
+        // 💡 [실시간 회전 최적화 파이프라인]
         viewModel.currentYaw.observe(this, yaw -> {
             if (viewModel.bleConnectionState.getValue() != null && viewModel.bleConnectionState.getValue() == 2) {
                 tvYawStatus.setText("기기 연결됨 | 방위각: " + String.format("%.1f", yaw) + "°");
             }
-            if (isMapReady && userMarker != null) {
-                if (defaultArrowBitmap == null) {
-                    defaultArrowBitmap = createDefaultArrowBitmap();
-                    userMarker.setIcon(defaultArrowBitmap);
+
+            if (isMapReady && ivCustomUserMarker != null) {
+                float currentYawValue = yaw.floatValue();
+
+                // [-180도 ↔ 180도 구간 교차 시 마커 역회전 방지 보정 알고리즘]
+                if (mIsFirstAngleSync) {
+                    mLatestCalculatedAngle = currentYawValue;
+                    mIsFirstAngleSync = false;
+                } else {
+                    float angleDiff = currentYawValue - mLatestCalculatedAngle;
+
+                    while (angleDiff < -180.0f) angleDiff += 360.0f;
+                    while (angleDiff > 180.0f)  angleDiff -= 360.0f;
+
+                    mLatestCalculatedAngle += angleDiff;
+
+                    while (mLatestCalculatedAngle < -180.0f) mLatestCalculatedAngle += 360.0f;
+                    while (mLatestCalculatedAngle > 180.0f)  mLatestCalculatedAngle -= 360.0f;
                 }
-                TMapPoint newPoint = new TMapPoint(viewModel.curLat, viewModel.curLng, yaw.floatValue());
-                userMarker.setTMapPoint(newPoint);
+
+                // 🚀 안드로이드 OS 하드웨어 가속 회전 명령어 적용 (깜빡임 0%)
+                if (ivCustomUserMarker.getVisibility() == View.GONE) {
+                    ivCustomUserMarker.setVisibility(View.VISIBLE);
+                }
+                ivCustomUserMarker.setRotation(mLatestCalculatedAngle);
+
+                // 실시간 회전 발생 시 지도 동기화 유도
+                tMapView.setCenterPoint(viewModel.curLat, viewModel.curLng);
             }
             if (isGuiding) {
                 drawGuideLineToTarget();
@@ -183,11 +221,11 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         btnCancel.setOnClickListener(v -> {
             new AlertDialog.Builder(MainActivity.this)
                     .setTitle("경로 안내 취소")
-                    .setMessage("정말로 진행 중인 안전 경로 안내를 종료하시겠습니까?")
+                    .setMessage("정말로 진행 중인 안전 경로 안내를 종료하시겠습니까?\n(방위각 나침반 기능은 계속 유지됩니다.)")
                     .setPositiveButton("안내 종료", (dialog, which) -> {
                         isGuiding = false;
                         viewModel.setGuidingState(false);
-                        BleManager.getInstance().updateGuideState(false, 0.0f);
+                        BleManager.getInstance().stopGuidanceOnly();
                         viewModel.cancelRouteGuidance();
                         if (isMapReady) {
                             tMapView.removeAllTMapPolyLine();
@@ -199,6 +237,17 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                     .show();
         });
 
+        btnBleDisconnect.setOnClickListener(v -> {
+            new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("기기 연결 해제")
+                    .setMessage("라즈베리파이 가이드 기기와의 블루투스 연결을 완전히 끊으시겠습니까?\n해제 시 웨어러블 장치들이 초기화(대기동작)됩니다.")
+                    .setPositiveButton("연결 끊기", (dialog, which) -> {
+                        BleManager.getInstance().forceBleDisconnect();
+                    })
+                    .setNegativeButton("연결 유지", null)
+                    .show();
+        });
+
         btnMic.setOnClickListener(v -> {
             viewModel.getAudioService().startListening(new AudioService.SpeechCallback() {
                 @Override
@@ -206,7 +255,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                     searchController.setText(text);
                     showSearchConfirmationDialog(text);
                 }
-
                 @Override
                 public void onStatusChange(boolean isListening) {}
             });
@@ -216,6 +264,15 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
             Intent intent = new Intent(MainActivity.this, AudioSettingsActivity.class);
             startActivity(intent);
         });
+    }
+
+    private void onDestinationArrived() {
+        Toast.makeText(this, "목적지에 도착했습니다. 가이드를 안전 종료합니다.", Toast.LENGTH_LONG).show();
+        isGuiding = false;
+        viewModel.setGuidingState(false);
+        BleManager.getInstance().stopGuidanceOnly();
+        if (isMapReady) tMapView.removeAllTMapPolyLine();
+        btnCancel.setVisibility(View.GONE);
     }
 
     private void showBleScanDialog() {
@@ -238,34 +295,10 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         BleManager.getInstance().startScan();
     }
 
-    private Bitmap createDefaultArrowBitmap() {
-        int size = 64;
-        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
-        android.graphics.Paint paint = new android.graphics.Paint();
-        paint.setColor(Color.RED);
-        paint.setStyle(android.graphics.Paint.Style.FILL);
-        paint.setAntiAlias(true);
-
-        android.graphics.Path path = new android.graphics.Path();
-        path.moveTo(size / 2f, 10);
-        path.lineTo(15, size - 15);
-        path.lineTo(size / 2f, size - 25);
-        path.lineTo(size - 15, size - 15);
-        path.close();
-
-        canvas.drawPath(path, paint);
-        return bitmap;
-    }
-
     @Override
     public void onMapReady() {
         isMapReady = true;
         tMapView.setZoomLevel(18);
-        userMarker = new TMapMarkerItem();
-        userMarker.setName("내 위치");
-        userMarker.setVisible(true);
-        userMarker.setId("user_location_marker");
         forceMapCenterToCurrentLocation();
     }
 
@@ -277,9 +310,12 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                 lastKnown = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
             }
             if (lastKnown != null) {
-                userMarker.setTMapPoint(lastKnown.getLatitude(), lastKnown.getLongitude());
                 tMapView.setCenterPoint(lastKnown.getLatitude(), lastKnown.getLongitude());
                 viewModel.updateLocation(lastKnown.getLatitude(), lastKnown.getLongitude());
+
+                if (ivCustomUserMarker != null && ivCustomUserMarker.getVisibility() == View.GONE) {
+                    ivCustomUserMarker.setVisibility(View.VISIBLE);
+                }
                 isInitialLocationSet = true;
             }
         } catch (SecurityException e) {
@@ -332,7 +368,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                                             btnCancel.setVisibility(View.VISIBLE);
                                         });
                                     }
-
                                     @Override
                                     public void onFailure(Exception e) {
                                         Log.e(TAG, "경로 탐색 실패: " + e.getMessage());
@@ -343,7 +378,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                             .show();
                 });
             }
-
             @Override
             public void onFailure(Exception e) {
                 Log.e(TAG, "POI 검색 실패: " + e.getMessage());
@@ -379,28 +413,23 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         double lng = location.getLongitude();
 
         viewModel.updateLocation(lat, lng);
-        if (!isMapReady || tMapView == null || userMarker == null) return;
+        if (!isMapReady || tMapView == null) return;
 
-        float currentYawValue = viewModel.currentYaw.getValue() != null ? viewModel.currentYaw.getValue().floatValue() : 0f;
-        TMapPoint currentPoint = new TMapPoint(lat, lng, currentYawValue);
-        userMarker.setTMapPoint(currentPoint);
+        // GPS 연동 위치 동기화
+        tMapView.setCenterPoint(lat, lng);
 
-        if (!isMarkerAddedToMap) {
-            if (defaultArrowBitmap == null) {
-                defaultArrowBitmap = createDefaultArrowBitmap();
-                userMarker.setIcon(defaultArrowBitmap);
-            }
-            tMapView.addTMapMarkerItem(userMarker);
-            isMarkerAddedToMap = true;
+        if (ivCustomUserMarker != null && ivCustomUserMarker.getVisibility() == View.GONE) {
+            ivCustomUserMarker.setVisibility(View.VISIBLE);
         }
 
         if (!isInitialLocationSet) {
-            tMapView.setCenterPoint(lat, lng);
             isInitialLocationSet = true;
         }
 
         if (isGuiding) {
             drawGuideLineToTarget();
         }
+
+        tMapView.invalidate();
     }
 }
