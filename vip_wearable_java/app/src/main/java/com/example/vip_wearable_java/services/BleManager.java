@@ -219,14 +219,42 @@ public class BleManager {
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             if (CHAR_YAW_NOTIFY_UUID.equals(characteristic.getUuid())) {
                 byte[] data = characteristic.getValue();
-                if (data != null && data.length == 5 && data[0] == (byte) 0x11) {
-                    java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(data, 1, 4);
-                    buffer.order(java.nio.ByteOrder.BIG_ENDIAN);
-                    float receivedYaw = buffer.getFloat();
 
-                    if (dataCallback != null) {
-                        dataCallback.onYawReceived(receivedYaw);
-                    }
+                // [로그 1] 하드웨어로부터 BLE 패킷 신호 자체를 수신했는지 확인
+                if (data == null) {
+                    Log.d("BLE_DEBUG", "⚠️ [수신 에러] 로우 데이터 패킷이 null입니다.");
+                    return;
+                }
+
+                // [로그 2] 들어온 패킷의 실제 바이트 길이와 Hex 스트링 상태 로깅
+                StringBuilder sb = new StringBuilder();
+                for (byte b : data) {
+                    sb.append(String.format("%02X ", b));
+                }
+                Log.d("BLE_DEBUG", "📥 [패킷 수신] 길이: " + data.length + " bytes | 데이터(HEX): [ " + sb.toString().trim() + " ]");
+
+                // [로그 3] 조건문 필터링 통과 여부 검증 팩트체크
+                if (data.length != 5) {
+                    Log.d("BLE_DEBUG", "❌ [필터 탈락] 패킷 규격이 5바이트가 아닙니다. (현재: " + data.length + ")");
+                    return;
+                }
+                if (data[0] != (byte) 0x11) {
+                    Log.d("BLE_DEBUG", "❌ [필터 탈락] 헤더 바이트가 0x11이 아닙니다. (현재 헤더: 0x" + String.format("%02X", data[0]) + ")");
+                    return;
+                }
+
+                // 기존 파싱 로직 수행
+                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(data, 1, 4);
+                buffer.order(java.nio.ByteOrder.BIG_ENDIAN);
+                float receivedYaw = buffer.getFloat();
+
+                // [로그 4] 최종 변환된 Float 데이터와 콜백 전달 성공 여부 로깅
+                Log.d("BLE_DEBUG", "✅ [파싱 성공] 최종 변환된 Yaw 각도값: " + receivedYaw + "°");
+
+                if (dataCallback != null) {
+                    dataCallback.onYawReceived(receivedYaw);
+                } else {
+                    Log.d("BLE_DEBUG", "⚠️ [콜백 인터셉트] dataCallback 인터페이스가 null 상태라 ViewModel로 값을 넘기지 못했습니다.");
                 }
             }
         }
