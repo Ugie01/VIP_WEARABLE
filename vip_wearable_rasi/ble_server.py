@@ -1,26 +1,62 @@
 import asyncio
 import struct
 import sys
-import serial  # pip install pyserial 필요
+import time
+import serial
 from bluez_peripheral.util import *
 from bluez_peripheral.advert import Advertisement
 from bluez_peripheral.gatt.service import Service
 from bluez_peripheral.gatt.characteristic import characteristic, CharacteristicFlags
 
-# GATT 통신용 고유 서비스 및 캐릭터리스틱 UUID 설정
+# [GATT 사양 고정] 기존 앱 5바이트 사양과 100% 일치
 SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb"
 CHAR_YAW_NOTIFY_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
 CHAR_ERROR_WRITE_UUID = "0000ffe2-0000-1000-8000-00805f9b34fb"
 
-# [하이퍼파라미터] 데이터 주기 제어 선언 (단위: 초)
-YAW_TX_PERIOD_SEC = 0.05    # 라즈베리파이 -> 안드로이드 앱 (50ms 주기 송신)
+YAW_TX_PERIOD_SEC = 0.05    
+DISCONNECT_TIMEOUT_SEC = 2.0  # 💡 앱 패킷이 2초간 끊기면 무조건 단절로 간주
 
-# [하드웨어 설정] 라즈베리파이 고유 UART 포트 및 보레이트 지정
-UART_PORT = "/dev/ttyS0"     # GPIO 14, 15번 핀 (라파 모델 및 설정에 따라 /dev/ttyAMA0 일 수 있음)
+UART_PORT = "/dev/ttyS0"     
 BAUDRATE = 115200
 
-# 전역 공유용 데이터 필드 (STM32 수신 루프가 이를 실시간 업데이트함)
 latest_stm32_yaw = 0.0
+global_ser = None             
+has_st_awakened = False       
+last_rx_packet_time = 0.0     # 💡 앱으로부터 0x22 패킷을 마지막으로 수신한 시간
+
+def reset_hardware_to_sleep():
+    global has_st_awakened, latest_stm32_yaw, global_ser
+    if has_st_awakened:
+        has_st_awakened = False
+        print("\n==================================================")
+        print("[시스템 시퀀스] 앱 데이터 스트림 수신 단절 최종 감지!")
+        print("[대기동작 진입] ST 보드를 슬립 모드(0x00)로 리셋 조치합니다.")
+        print("==================================================")
+        send_control_flag_to_stm32(0x00)
+        latest_stm32_yaw = 0.0
+        if global_ser and global_ser.is_open:
+            global_ser.reset_input_buffer()
+
+def send_control_flag_to_stm32(flag_value):
+    global global_ser
+    if global_ser and global_ser.is_open:
+        try:
+            packet = bytearray([0xAA]) + struct.pack('!f', 0.0) + bytearray([flag_value])
+            global_ser.write(packet)
+            global_ser.flush()  # 💡 버퍼 밀림 없이 즉시 물리 전송 완료 보장
+            status_text = "구동(Wake)" if flag_value == 0x01 else "대기/초기화(Sleep)"
+            print(f"[하드웨어 제어] ST 보드로 {status_text} 명령 플래그({hex(flag_value)}) 전송 완료.")
+        except Exception as e:
+            print(f"[하드웨어 제어 오류] ST 플래그 전파 실패: {e}")
+
+def send_angle_error_to_stm32(angle_error):
+    global global_ser
+    if global_ser and global_ser.is_open:
+        try:
+            packet = bytearray([0xAA]) + struct.pack('!f', angle_error) + bytearray([0x01])
+            global_ser.write(packet)
+        except Exception as e:
+            print(f"[하드웨어 제어 오류] ST 오차 데이터 전파 실패: {e}")
 
 class TrackerGattService(Service):
     def __init__(self):
@@ -37,76 +73,105 @@ class TrackerGattService(Service):
 
     @error_characteristic.setter
     def error_characteristic(self, value, options):
+        global has_st_awakened, global_ser, last_rx_packet_time
         try:
             if len(value) == 5 and value[0] == 0x22:
                 angle_error = struct.unpack('!f', value[1:5])[0]
                 
-                if angle_error == 0.0:
-                    print(f"\n[수신] 경로 편차 오차: {angle_error:.1f}° -> 중심 정렬 주행 중")
-                else:
-                    direction = "오른쪽" if angle_error > 0 else "왼쪽"
-                    print(f"\n[수신] 경로 편차 오차: {angle_error:.1f}° -> {direction} 보정 명령 접수")
-                    
-                # 💡 [하드웨어 확장 포인트]: 앱에서 수신된 편차 오차 값(5바이트)을 
-                # 필요하다면 STM32 보드로 다시 역전송(ser.write)하여 모터를 즉각 제어할 수도 있습니다.
-                
-            else:
-                print(f"\n[경고] 프로토콜 포맷 결함 무효 처리: {value.hex()}")
-        except Exception as e:
-            print(f"\n[오류] 패킷 디코딩 실패: {e}")
+                # 💡 앱에서 정상 데이터가 들어올 때마다 타임스탬프 최신화
+                last_rx_packet_time = time.time()
 
-# 💡 [새로 추가]: STM32 로부터 100ms마다 들어오는 UART 데이터를 백그라운드에서 읽는 독립 코루틴
+                if not has_st_awakened:
+                    has_st_awakened = True
+                    print("\n==================================================")
+                    print("[BLE 이벤트] 안드로이드 앱 연동 성공! 나침반 및 통신 가동.")
+                    print("==================================================")
+                    if global_ser and global_ser.is_open:
+                        global_ser.reset_input_buffer()
+                    send_control_flag_to_stm32(0x01)
+
+                # 실시간 각도 오차 데이터 ST 보드로 즉시 다운스트림 전송
+                send_angle_error_to_stm32(angle_error)
+
+                if angle_error != 0.0:
+                    direction = "오른쪽" if angle_error > 0 else "왼쪽"
+                    print(f"[수신] 앱 경로 편차 오차: {angle_error:.1f}° -> {direction} 보정 제어 중          ", end="\n\r")
+                else:
+                    print("[상태] Tmap 안내 대기 중 | 실시간 나침반 스트리밍 가동 중", end="\r")
+            else:
+                print(f"\n[경고] 앱 통신 규격 부적합 프로토콜 유입 무효화: {value.hex()}")
+        except Exception as e:
+            print(f"\n[오류] 앱 패킷 디코딩 실패: {e}")
+
 async def read_stm32_uart_loop():
-    global latest_stm32_yaw
+    global latest_stm32_yaw, global_ser, has_st_awakened
     print(f"[하드웨어] STM32 수신용 UART 채널 바인딩 가동 ({UART_PORT}, {BAUDRATE}bps)")
     
     try:
-        # 논블로킹 타임아웃 설정을 주어 비동기 루프와 간섭 방지
-        ser = serial.Serial(UART_PORT, baudrate=BAUDRATE, timeout=0.1)
+        global_ser = serial.Serial(UART_PORT, baudrate=BAUDRATE, timeout=0.1)
     except Exception as e:
         print(f"[하드웨어 오류] UART 포트 개방 실패 (권한 누락 또는 장치 없음): {e}")
         return
 
     while True:
         try:
-            if ser.in_waiting >= 5: # 최소 패킷 크기(5바이트) 이상 쌓였을 때만 포킹
-                header = ser.read(1)
-                if header == b'\xaa': # 약속한 헤더 0xAA 매칭 가드 검증
-                    payload = ser.read(4)
-                    # STM32가 리틀 엔디안('<f') 또는 빅 엔디안('!f')으로 보낸 데이터 파싱
-                    # (일반적으로 STM32는 리틀 엔디안 구조를 취하므로 '<f'를 기본 적용)
+            if not has_st_awakened:
+                if global_ser.is_open and global_ser.in_waiting > 0:
+                    global_ser.reset_input_buffer()
+                await asyncio.sleep(0.1)
+                continue
+
+            if global_ser.is_open and global_ser.in_waiting >= 5:
+                header = global_ser.read(1)
+                if header == b'\xaa':
+                    payload = global_ser.read(4)
                     parsed_yaw = struct.unpack('<f', payload)[0]
                     
-                    # 수신 범위 유효성 체크 및 전역 변수 갱신
                     if -180.0 <= parsed_yaw <= 180.0:
                         latest_stm32_yaw = parsed_yaw
                         
         except Exception as e:
             print(f"\n[UART 통신 오류] 데이터 스트림 무효화: {e}")
             
-        # 10ms 단위 초고속 내부 동기화 폴링 유지
         await asyncio.sleep(0.01)
 
 async def send_yaw_loop(service_instance):
     print(f"[가이드] {int(YAW_TX_PERIOD_SEC * 1000)}ms 주기 네이티브 방위각 스트리밍 타이머 가동.")
-    global latest_stm32_yaw
+    global latest_stm32_yaw, has_st_awakened
     
     while True:
         try:
-            # 더 이상 가짜 변동 데이터가 아니라, UART 백그라운드 루프가 채워주는 실제 최신 실시간 값을 빌드
+            if not has_st_awakened:
+                await asyncio.sleep(YAW_TX_PERIOD_SEC)
+                continue
+
             raw_packet = bytearray([0x11]) + struct.pack('!f', latest_stm32_yaw)
             packet = bytes(raw_packet)
             
             service_instance.yaw_characteristic.changed(packet)
-            print(f"[송신] STM32 네이티브 방위각(Yaw) 앱으로 유출 중: {latest_stm32_yaw:.2f}°", end="\r")
+            print(f"[송신] STM32 네이티브 방위각(Yaw) 앱 전송 중: {latest_stm32_yaw:.2f}°", end="\r")
                 
         except Exception as e:
-            print(f"\n[송신 익셉션 오류] {e}")
+            # 원격 단절 에러 감지 시에도 리셋 절차 수행
+            reset_hardware_to_sleep()
             
         await asyncio.sleep(YAW_TX_PERIOD_SEC)
 
+# 💡 [핵심 가동]: 앱의 무선 상황과 무관하게 2초간 패킷 유입이 멈추면 강제로 연결을 끊고 슬립 모드로 진입시킵니다.
+async def track_software_heartbeat_timeout():
+    global has_st_awakened, last_rx_packet_time
+    while True:
+        try:
+            if has_st_awakened and (time.time() - last_rx_packet_time > DISCONNECT_TIMEOUT_SEC):
+                print(f"\n[하트비트 감지] 최근 {DISCONNECT_TIMEOUT_SEC}초간 앱 데이터 유입 없음 (단절 확정).")
+                reset_hardware_to_sleep()
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+
 async def main():
     bus = await get_message_bus()
+    
     service = TrackerGattService()
     await service.register(bus)
     
@@ -123,10 +188,10 @@ async def main():
     print("==================================================")
     print("[대기] 스마트폰 어플리케이션으로부터 스캔 및 연결 바인딩을 기다립니다.")
     
-    # 💡 두 개의 비동기 태스크(UART 수신 가동 + BLE 앱 송신 제어)를 동시에 병렬 실행(Concurrent)
     await asyncio.gather(
         send_yaw_loop(service),
-        read_stm32_uart_loop()
+        read_stm32_uart_loop(),
+        track_software_heartbeat_timeout()  # 정밀 타임아웃 프로세스 가동
     )
 
 if __name__ == "__main__":
@@ -134,4 +199,8 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n[시스템] 인터럽트 시그널 감지. 가이드 서버를 안전하게 종료합니다.")
+        if global_ser and global_ser.is_open:
+            has_st_awakened = True
+            reset_hardware_to_sleep()
+            global_ser.close()
         sys.exit(0)
