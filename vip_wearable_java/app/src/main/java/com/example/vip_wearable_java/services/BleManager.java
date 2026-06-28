@@ -41,7 +41,7 @@ public class BleManager {
     private BleDataCallback dataCallback;
 
     private ScheduledExecutorService txExecutor;
-    private long txPeriodMs = 300; // 💡 통신 주기 하이퍼파라미터 (기본값 300ms)
+    private long txPeriodMs = 200; // 통신 주기 하이퍼파라미터 (기본값 200ms)
     private boolean isGuidingRef = false;
     private float currentErrorRef = 0.0f;
 
@@ -157,23 +157,26 @@ public class BleManager {
                             gatt.writeDescriptor(descriptor);
                         }
                     }
-                    // 하이퍼파라미터 주기에 의거한 역송신 타이머 시작
-                    restartTxLoop();
                 }
             }
         }
+        @Override
+        public void onDescriptorWrite(BluetoothGatt gatt, android.bluetooth.BluetoothGattDescriptor descriptor, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d("BLE_DEBUG", "Notify 채널 활성화 핸드셰이크 최종 성공. 이제 역송신을 시작합니다.");
 
+                // 2. 명령이 끝났으니 이제 안전하게 타이머 루프를 가동합니다. (병목 현상 100% 차단)
+                restartTxLoop();
+            }
+        }
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             if (CHAR_YAW_NOTIFY_UUID.equals(characteristic.getUuid())) {
                 byte[] data = characteristic.getValue();
-                // 프로토콜 무결성 검증: 5바이트 고정 크기 및 헤더 0x11 체킹
                 if (data != null && data.length == 5 && data[0] == (byte) 0x11) {
-                    int bits = ((data[1] & 0xFF) << 24) |
-                            ((data[2] & 0xFF) << 16) |
-                            ((data[3] & 0xFF) << 8)  |
-                            ((data[4] & 0xFF));
-                    float receivedYaw = Float.intBitsToFloat(bits);
+                    java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(data, 1, 4);
+                    buffer.order(java.nio.ByteOrder.BIG_ENDIAN);
+                    float receivedYaw = buffer.getFloat();
 
                     if (dataCallback != null) {
                         dataCallback.onYawReceived(receivedYaw);
@@ -197,11 +200,11 @@ public class BleManager {
     }
 
     private void sendGuidePacket() {
+        // 경로 안내 중(`isGuidingRef == true`)일 때만 라즈베리파이로 역송신 처리 수행 가드
         if (bluetoothGatt == null || writeCharacteristic == null || !isGuidingRef) return;
 
-        // 5바이트 구조 빌드: [0x22] + [Float 4Bytes Error]
         byte[] packet = new byte[5];
-        packet[0] = (byte) 0x22;
+        packet[0] = (byte) 0x22; // 헤더 지정
 
         int bits = Float.floatToIntBits(currentErrorRef);
         packet[1] = (byte) (bits >> 24);

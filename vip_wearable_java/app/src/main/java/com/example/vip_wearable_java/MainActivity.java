@@ -187,7 +187,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                     .setPositiveButton("안내 종료", (dialog, which) -> {
                         isGuiding = false;
                         viewModel.setGuidingState(false);
-
+                        BleManager.getInstance().updateGuideState(false, 0.0f);
                         viewModel.cancelRouteGuidance();
                         if (isMapReady) {
                             tMapView.removeAllTMapPolyLine();
@@ -327,7 +327,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                                         runOnUiThread(() -> {
                                             isGuiding = true;
                                             viewModel.setGuidingState(true);
-
+                                            BleManager.getInstance().updateGuideState(true, 0.0f);
                                             drawRouteOnNativeMap(resultSegments);
                                             btnCancel.setVisibility(View.VISIBLE);
                                         });

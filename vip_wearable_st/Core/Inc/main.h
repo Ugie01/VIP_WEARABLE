@@ -67,22 +67,26 @@ void Error_Handler(void);
 #define LD2_GPIO_Port GPIOA
 #define Haptic_R_SCL_Pin GPIO_PIN_10
 #define Haptic_R_SCL_GPIO_Port GPIOB
-#define Haptic_R_SDA_Pin GPIO_PIN_9
-#define Haptic_R_SDA_GPIO_Port GPIOC
+#define RASI_TX_Pin GPIO_PIN_6
+#define RASI_TX_GPIO_Port GPIOC
+#define RASI_RX_Pin GPIO_PIN_7
+#define RASI_RX_GPIO_Port GPIOC
+#define Haptic_L_SDA_Pin GPIO_PIN_9
+#define Haptic_L_SDA_GPIO_Port GPIOC
 #define Haptic_L_SCL_Pin GPIO_PIN_8
 #define Haptic_L_SCL_GPIO_Port GPIOA
-#define RASI_TX_Pin GPIO_PIN_9
-#define RASI_TX_GPIO_Port GPIOA
-#define RASI_RX_Pin GPIO_PIN_10
-#define RASI_RX_GPIO_Port GPIOA
+#define IMU_TX_Pin GPIO_PIN_9
+#define IMU_TX_GPIO_Port GPIOA
+#define IMU_RX_Pin GPIO_PIN_10
+#define IMU_RX_GPIO_Port GPIOA
 #define TMS_Pin GPIO_PIN_13
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
-#define Haptic_L_SDA_Pin GPIO_PIN_9
-#define Haptic_L_SDA_GPIO_Port GPIOB
+#define Haptic_R_SDA_Pin GPIO_PIN_9
+#define Haptic_R_SDA_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

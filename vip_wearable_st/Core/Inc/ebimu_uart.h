@@ -17,7 +17,7 @@
 
 #define SIZE 80
 
-typedef struct {
+typedef struct __attribute__((packed)) {
 	uint16_t sop;          // 0x55, 0x55 (2바이트)
 
 	// 오일러 각도
@@ -42,7 +42,7 @@ typedef struct {
 	UART_HandleTypeDef *huart;
 
 	uint8_t rx_Data[SIZE];
-
+	uint16_t head;
 	uint8_t SET_OUTPUT_CODE;
 	uint8_t OUTPUT_DATA_FORMAT;
 
