@@ -1,0 +1,19 @@
+# 빌드 출력 디렉토리
+Debug/
+Release/
+
+# 컴파일러 생성 파일
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+
+# IDE 개인 설정 파일
+.hex
+.la
+.o
+.lo
+*.launch

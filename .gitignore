@@ -1,0 +1,8 @@
+# OS 무관 임시 파일
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# IDE 공통
+.vscode/

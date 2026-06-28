@@ -1,0 +1,12 @@
+# 파이썬 바이트코드
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# 환경변수 파일 (API Key 등 보안)
+.env
