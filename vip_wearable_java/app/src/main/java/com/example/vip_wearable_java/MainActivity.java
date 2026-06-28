@@ -60,6 +60,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
 
     private final ArrayList<BluetoothDevice> scannedBleDevices = new ArrayList<>();
     private ArrayAdapter<String> bleDeviceListAdapter;
+    private ImageButton btnBleDisconnect;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,8 +86,9 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         ImageButton btnSearch = findViewById(R.id.btn_search);
         btnCancel = findViewById(R.id.btn_cancel);
         ImageButton btnSettings = findViewById(R.id.btn_settings);
-
+        btnBleDisconnect = findViewById(R.id.btn_ble_disconnect);
         ImageButton btnBleScan = findViewById(R.id.btn_ble_scan);
+
         if (btnBleScan != null) {
             btnBleScan.setOnClickListener(v -> showBleScanDialog());
         }
@@ -134,18 +136,29 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         });
 
         viewModel.bleConnectionState.observe(this, state -> {
-            if (state == 2) {
+
+            if (state == 2) { // 연결 완료 상태
                 tvYawStatus.setBackgroundColor(Color.parseColor("#4CAF50"));
                 tvYawStatus.setTextColor(Color.WHITE);
                 tvYawStatus.setText("기기 BLE 연결됨");
-            } else if (state == 1) {
+
+                // 버튼 상태 가변 제어
+                if(btnBleScan != null) btnBleScan.setVisibility(View.GONE);
+                if(btnBleDisconnect != null) btnBleDisconnect.setVisibility(View.VISIBLE);
+
+            } else if (state == 1) { // 연결 중 상태
                 tvYawStatus.setBackgroundColor(Color.parseColor("#FFC107"));
                 tvYawStatus.setTextColor(Color.BLACK);
                 tvYawStatus.setText("기기 연결 중...");
-            } else {
+
+            } else { // 연결 안 됨 (초기화 상태)
                 tvYawStatus.setBackgroundColor(Color.parseColor("#F44336"));
                 tvYawStatus.setTextColor(Color.WHITE);
                 tvYawStatus.setText("기기 BLE 연결 안됨 (터치하여 스캔)");
+
+                // 버튼 상태 원복 제어
+                if(btnBleScan != null) btnBleScan.setVisibility(View.VISIBLE);
+                if(btnBleDisconnect != null) btnBleDisconnect.setVisibility(View.GONE);
             }
         });
 
@@ -183,11 +196,15 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         btnCancel.setOnClickListener(v -> {
             new AlertDialog.Builder(MainActivity.this)
                     .setTitle("경로 안내 취소")
-                    .setMessage("정말로 진행 중인 안전 경로 안내를 종료하시겠습니까?")
+                    .setMessage("정말로 진행 중인 안전 경로 안내를 종료하시겠습니까?\n(방위각 나침반 기능은 계속 유지됩니다.)")
                     .setPositiveButton("안내 종료", (dialog, which) -> {
                         isGuiding = false;
                         viewModel.setGuidingState(false);
-                        BleManager.getInstance().updateGuideState(false, 0.0f);
+
+                        // 🚀 핵심 교정: BLE 연결은 유지하고 앱의 타겟 각도 송신 타이머만 정지시킵니다.
+                        // 이 순간 라파와 ST 보드는 안전하게 대기(Sleep) 모드로 연쇄 전환됩니다.
+                        BleManager.getInstance().stopGuidanceOnly();
+
                         viewModel.cancelRouteGuidance();
                         if (isMapReady) {
                             tMapView.removeAllTMapPolyLine();
@@ -198,7 +215,17 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                     .setNegativeButton("계속 주행", null)
                     .show();
         });
-
+        btnBleDisconnect.setOnClickListener(v -> {
+            new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("기기 연결 해제")
+                    .setMessage("라즈베리파이 가이드 기기와의 블루투스 연결을 완전히 끊으시겠습니까?\n해제 시 웨어러블 장치들이 초기화(대기동작)됩니다.")
+                    .setPositiveButton("연결 끊기", (dialog, which) -> {
+                        // 🚀 기획하신 시나리오 작동: 연결 해제 버튼을 눌렀을 때만 물리적 BLE 단절을 쏩니다.
+                        BleManager.getInstance().forceBleDisconnect();
+                    })
+                    .setNegativeButton("연결 유지", null)
+                    .show();
+        });
         btnMic.setOnClickListener(v -> {
             viewModel.getAudioService().startListening(new AudioService.SpeechCallback() {
                 @Override
@@ -217,7 +244,17 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
             startActivity(intent);
         });
     }
+    private void onDestinationArrived() {
+        Toast.makeText(this, "목적지에 도착했습니다. 가이드를 안전 종료합니다.", Toast.LENGTH_LONG).show();
+        isGuiding = false;
+        viewModel.setGuidingState(false);
 
+        // 🚀 핵심: 목적지 도착 시에도 BLE는 유지, 송신 데이터만 차단
+        BleManager.getInstance().stopGuidanceOnly();
+
+        if (isMapReady) tMapView.removeAllTMapPolyLine();
+        btnCancel.setVisibility(View.GONE);
+    }
     private void showBleScanDialog() {
         scannedBleDevices.clear();
         bleDeviceListAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);

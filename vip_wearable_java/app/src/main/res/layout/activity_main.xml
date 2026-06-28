@@ -60,6 +60,15 @@
             android:contentDescription="BLE 스캔" />
 
         <ImageButton
+            android:id="@+id/btn_ble_disconnect"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:src="@android:drawable/ic_menu_delete"
+            android:background="@android:color/transparent"
+            android:visibility="gone"
+            android:contentDescription="BLE 연결 끊기" />
+
+        <ImageButton
             android:id="@+id/btn_search"
             android:layout_width="40dp"
             android:layout_height="match_parent"
