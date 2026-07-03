@@ -64,4 +64,13 @@
         android:layout_height="50dp"
         android:text="설정 적용" />
 
+    <Button
+        android:id="@+id/btn_reset_ble"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:layout_marginTop="16dp"
+        android:text="BLE 연결 기록 초기화"
+        android:backgroundTint="#F44336"
+        android:textColor="#FFFFFF" />
+
 </LinearLayout>

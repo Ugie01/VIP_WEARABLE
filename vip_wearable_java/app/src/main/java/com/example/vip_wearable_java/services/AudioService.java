@@ -19,7 +19,7 @@ public class AudioService {
     private static volatile AudioService instance;
     private TextToSpeech tts;
     private SpeechRecognizer speechRecognizer;
-    private AudioManager audioManager; // 💡 시스템 오디오 매니저 추가
+    private AudioManager audioManager;
     private float volume = 1.0f;
     private float rate = 0.5f;
     private float pitch = 1.0f;
@@ -44,7 +44,6 @@ public class AudioService {
     public AudioService(Context context) {
         audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
 
-        // 💡 [개선] 초기화 시 시스템 볼륨 비율 대신, 저장되어 있던 사용자 커스텀 오디오 설정을 로드합니다. [cite: 15]
         this.volume = PreferenceManager.getVolume(context);
         this.rate = PreferenceManager.getRate(context);
         this.pitch = PreferenceManager.getPitch(context);
@@ -53,7 +52,7 @@ public class AudioService {
             if (status == TextToSpeech.SUCCESS) {
                 tts.setLanguage(Locale.KOREAN);
                 isInitialized = true;
-                applySettings(); // 로드된 속도(rate)와 톤(pitch)을 TTS 엔진에 즉시 바인딩 [cite: 15]
+                applySettings();
             }
         });
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context);
@@ -61,11 +60,10 @@ public class AudioService {
 
     private void applySettings() {
         if (!isInitialized) return;
-        tts.setSpeechRate(rate); // 빠르기 제어 [cite: 15]
-        tts.setPitch(pitch);    // 목소리 톤(음높이) 제어 [cite: 15]
+        tts.setSpeechRate(rate);
+        tts.setPitch(pitch);
     }
 
-    // 💡 파라미터에서 Context context를 제거합니다.
     public void startListening(SpeechCallback callback) {
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -87,13 +85,12 @@ public class AudioService {
         });
         speechRecognizer.startListening(intent);
     }
-    // 💡 2. 핸드폰 현재 설정 볼륨 비율을 가져오는 메서드 (0.0f ~ 1.0f)
     private void updateVolumeFromSystem() {
         if (audioManager != null) {
             float currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
             float maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             if (maxVol > 0) {
-                this.volume = currentVol / maxVol; // 현재 핸드폰 소리 크기 비율 반영
+                this.volume = currentVol / maxVol;
             }
         }
     }
@@ -113,11 +110,8 @@ public class AudioService {
     public void speak(String text) {
         if (!isInitialized || tts == null) return;
 
-        // 💡 3. 말하기 직전에 사용자가 핸드폰 버튼으로 소리를 바꿨을 수 있으므로 재동기화
         updateVolumeFromSystem();
-
         Bundle params = new Bundle();
-        // 💡 핸드폰 기존 설정 소리(this.volume)를 파라미터로 강제 바인딩
         params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, this.volume);
 
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, null);

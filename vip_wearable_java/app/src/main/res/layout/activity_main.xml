@@ -65,15 +65,17 @@
             android:layout_height="match_parent"
             android:src="@android:drawable/stat_sys_data_bluetooth"
             android:background="@android:color/transparent"
+            app:tint="#000000"
             android:contentDescription="BLE 스캔" />
 
         <ImageButton
             android:id="@+id/btn_ble_disconnect"
             android:layout_width="40dp"
             android:layout_height="match_parent"
-            android:src="@android:drawable/ic_menu_delete"
+            android:src="@android:drawable/stat_sys_data_bluetooth"
             android:background="@android:color/transparent"
             android:visibility="gone"
+            app:tint="#00FF00"
             android:contentDescription="BLE 연결 끊기" />
 
         <ImageButton

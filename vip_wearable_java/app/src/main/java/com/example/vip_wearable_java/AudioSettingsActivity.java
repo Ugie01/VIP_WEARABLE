@@ -3,6 +3,8 @@ package com.example.vip_wearable_java;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.SeekBar;
+import android.widget.Toast;
+
 import androidx.appcompat.app.AppCompatActivity;
 import com.example.vip_wearable_java.services.AudioService;
 import com.example.vip_wearable_java.R;
@@ -19,24 +21,28 @@ public class AudioSettingsActivity extends AppCompatActivity {
         SeekBar sbPitch = findViewById(R.id.sb_pitch);
         Button btnSave = findViewById(R.id.btn_save);
 
-        // 현재 전역 주입된 싱글톤 AudioService 속도 값을 디폴트로 세팅 (초기 바인딩 보정)
         AudioService audioService = AudioService.getInstance(this);
         int currentProgress = (int) ((audioService.getRate() - 0.2f) * 10.0f);
         sbRate.setProgress(currentProgress);
 
         btnSave.setOnClickListener(v -> {
-            // UI 크기 슬라이더(SeekBar) 값 파싱 정밀 연산 (예시)
             float selectedVolume = sbVolume.getProgress() / 10.0f;
-            float speedRate = (sbRate.getProgress() / 10.0f) + 0.2f; // [cite: 13]
-            float voicePitch = (sbPitch.getProgress() / 10.0f) + 0.5f; // 0.5 ~ 1.5 톤 범위 제어
+            float speedRate = (sbRate.getProgress() / 10.0f) + 0.2f;
+            float voicePitch = (sbPitch.getProgress() / 10.0f) + 0.5f;
 
-            // 1. 싱글톤 오디오 엔진에 즉시 설정 변경 파라미터 업데이트 전달 [cite: 13]
             audioService.setParams(selectedVolume, speedRate, voicePitch);
 
-            // 2. 디바이스 저장소에 저장하여 재구동 시에도 값 유지 보장 [cite: 46]
             PreferenceManager.saveAudioParams(this, selectedVolume, speedRate, voicePitch);
 
-            finish(); // [cite: 13]
+            finish();
         });
+
+        Button btnResetBle = findViewById(R.id.btn_reset_ble);
+        if (btnResetBle != null) {
+            btnResetBle.setOnClickListener(v -> {
+                PreferenceManager.clearBleDeviceAddress(this);
+                Toast.makeText(this, "BLE 기기 연결 기록이 초기화되었습니다.", Toast.LENGTH_SHORT).show();
+            });
+        }
     }
 }

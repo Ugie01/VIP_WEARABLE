@@ -30,4 +30,19 @@ public class PreferenceManager {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                 .getFloat("pitch", AppConfig.DEFAULT_AUDIO_PITCH);
     }
+
+    public static void saveBleDeviceAddress(Context context, String macAddress) {
+        SharedPreferences pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        pref.edit().putString("ble_mac", macAddress).apply();
+    }
+
+    public static String getBleDeviceAddress(Context context) {
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .getString("ble_mac", null);
+    }
+
+    public static void clearBleDeviceAddress(Context context) {
+        SharedPreferences pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        pref.edit().remove("ble_mac").apply();
+    }
 }

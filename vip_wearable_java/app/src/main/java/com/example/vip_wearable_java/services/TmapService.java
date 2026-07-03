@@ -91,7 +91,7 @@ public class TmapService {
                             if (properties.has("facilityType")) currentFacilityType = properties.get("facilityType").getAsString();
                         } else if (type.equals("LineString")) {
                             JsonArray coords = geometry.getAsJsonArray("coordinates");
-                            String color = "#FF0000"; // 기본 인도 없는 인프라구간 정적 표기값
+                            String color = "#FF0000";
                             if (currentFacilityType.equals("11") || currentFacilityType.equals("12")) color = "#FFFF00";
                             else if (currentFacilityType.equals("15")) color = "#00FF00";
                             else if (currentFacilityType.equals("17")) color = "#8A2BE2";

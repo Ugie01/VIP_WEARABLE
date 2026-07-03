@@ -31,6 +31,7 @@ import com.example.vip_wearable_java.models.RouteSegment;
 import com.example.vip_wearable_java.services.AudioService;
 import com.example.vip_wearable_java.services.BleManager;
 import com.example.vip_wearable_java.services.TmapService;
+import com.example.vip_wearable_java.utils.PreferenceManager;
 import com.example.vip_wearable_java.viewmodels.MapViewModel;
 import com.skt.tmap.TMapView;
 import com.skt.tmap.TMapPoint;
@@ -50,19 +51,13 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
     private TextView tvYawStatus, tvNavigationMsg;
     private LocationManager locationManager;
     private ImageButton btnCancel;
-
-    // 🔥 하드웨어 가속 컴포넌트 마커 정의
     private ImageView ivCustomUserMarker;
-
     private boolean isMapReady = false;
     private boolean isInitialLocationSet = false;
     private boolean isGuiding = false;
-
     private final ArrayList<BluetoothDevice> scannedBleDevices = new ArrayList<>();
     private ArrayAdapter<String> bleDeviceListAdapter;
     private ImageButton btnBleDisconnect;
-
-    // 꼬임 방지 연산용 글로벌 상태 변수
     private float mLatestCalculatedAngle = 0f;
     private boolean mIsFirstAngleSync = true;
 
@@ -71,10 +66,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // ⚠️ [튕김 예방 핵심 1단계] setContentView 직후에 이미지 뷰 레이어 주입 완료
         ivCustomUserMarker = findViewById(R.id.iv_custom_user_marker);
-
-        // ⚠️ [튕김 예방 핵심 2단계] 넣어주신 arrow.png 이미지를 이미지 뷰에 다이렉트 바인딩
         if (ivCustomUserMarker != null) {
             ivCustomUserMarker.setImageResource(R.drawable.arrow);
         }
@@ -121,10 +113,12 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         BleManager.getInstance().setCallbacks(new BleManager.BleStateCallback() {
             @Override
             public void onConnectionStateChanged(int newState) {
-                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                if (newState == 1) {
+                    viewModel.bleConnectionState.postValue(1);
+                } else if (newState == BluetoothProfile.STATE_CONNECTED || newState == 2) {
                     viewModel.bleConnectionState.postValue(2);
                     Toast.makeText(MainActivity.this, "라즈베리파이 연결 성공", Toast.LENGTH_SHORT).show();
-                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                } else {
                     viewModel.bleConnectionState.postValue(0);
                     Toast.makeText(MainActivity.this, "라즈베리파이 연결 해제", Toast.LENGTH_SHORT).show();
                 }
@@ -134,10 +128,13 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
             @Override
             public void onDeviceFound(BluetoothDevice device) {
                 runOnUiThread(() -> {
-                    if (!scannedBleDevices.contains(device) && device.getName() != null) {
-                        scannedBleDevices.add(device);
-                        bleDeviceListAdapter.add(device.getName() + "\n(" + device.getAddress() + ")");
-                        bleDeviceListAdapter.notifyDataSetChanged();
+                    String deviceName = device.getName();
+                    if (deviceName != null && deviceName.equals("VIP_Guide")) {
+                        if (!scannedBleDevices.contains(device)) {
+                            scannedBleDevices.add(device);
+                            bleDeviceListAdapter.add(deviceName + "\n(" + device.getAddress() + ")");
+                            bleDeviceListAdapter.notifyDataSetChanged();
+                        }
                     }
                 });
             }
@@ -150,24 +147,36 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                 tvYawStatus.setBackgroundColor(Color.parseColor("#4CAF50"));
                 tvYawStatus.setTextColor(Color.WHITE);
                 tvYawStatus.setText("기기 BLE 연결됨");
-                if(btnBleScan != null) btnBleScan.setVisibility(View.GONE);
-                if(btnBleDisconnect != null) btnBleDisconnect.setVisibility(View.VISIBLE);
+
+                if (btnBleScan != null) btnBleScan.setVisibility(View.GONE);
+                if (btnBleDisconnect != null) {
+                    btnBleDisconnect.setVisibility(View.VISIBLE);
+                    btnBleDisconnect.setColorFilter(Color.parseColor("#00FF00"));
+                }
             } else if (state == 1) {
                 tvYawStatus.setBackgroundColor(Color.parseColor("#FFC107"));
                 tvYawStatus.setTextColor(Color.BLACK);
                 tvYawStatus.setText("기기 연결 중...");
+
+                if (btnBleScan != null) btnBleScan.setVisibility(View.GONE);
+                if (btnBleDisconnect != null) {
+                    btnBleDisconnect.setVisibility(View.VISIBLE);
+                    btnBleDisconnect.setColorFilter(Color.parseColor("#FFA500"));
+                }
             } else {
                 tvYawStatus.setBackgroundColor(Color.parseColor("#F44336"));
                 tvYawStatus.setTextColor(Color.WHITE);
                 tvYawStatus.setText("기기 BLE 연결 안됨 (터치하여 스캔)");
-                if(btnBleScan != null) btnBleScan.setVisibility(View.VISIBLE);
-                if(btnBleDisconnect != null) btnBleDisconnect.setVisibility(View.GONE);
+
+                if (btnBleScan != null) {
+                    btnBleScan.setVisibility(View.VISIBLE);
+                    // 💡 아이콘 색상을 검정색으로 덧칠
+                    btnBleScan.setColorFilter(Color.parseColor("#000000"));
+                }
+                if (btnBleDisconnect != null) btnBleDisconnect.setVisibility(View.GONE);
             }
         });
 
-        tvYawStatus.setOnClickListener(v -> showBleScanDialog());
-
-        // 💡 [실시간 회전 최적화 파이프라인]
         viewModel.currentYaw.observe(this, yaw -> {
             if (viewModel.bleConnectionState.getValue() != null && viewModel.bleConnectionState.getValue() == 2) {
                 tvYawStatus.setText("기기 연결됨 | 방위각: " + String.format("%.1f", yaw) + "°");
@@ -176,7 +185,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
             if (isMapReady && ivCustomUserMarker != null) {
                 float currentYawValue = yaw.floatValue();
 
-                // [-180도 ↔ 180도 구간 교차 시 마커 역회전 방지 보정 알고리즘]
                 if (mIsFirstAngleSync) {
                     mLatestCalculatedAngle = currentYawValue;
                     mIsFirstAngleSync = false;
@@ -191,14 +199,11 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
                     while (mLatestCalculatedAngle < -180.0f) mLatestCalculatedAngle += 360.0f;
                     while (mLatestCalculatedAngle > 180.0f)  mLatestCalculatedAngle -= 360.0f;
                 }
-
-                // 🚀 안드로이드 OS 하드웨어 가속 회전 명령어 적용 (깜빡임 0%)
                 if (ivCustomUserMarker.getVisibility() == View.GONE) {
                     ivCustomUserMarker.setVisibility(View.VISIBLE);
                 }
                 ivCustomUserMarker.setRotation(mLatestCalculatedAngle);
 
-                // 실시간 회전 발생 시 지도 동기화 유도
                 tMapView.setCenterPoint(viewModel.curLat, viewModel.curLng);
             }
             if (isGuiding) {
@@ -240,9 +245,24 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         btnBleDisconnect.setOnClickListener(v -> {
             new AlertDialog.Builder(MainActivity.this)
                     .setTitle("기기 연결 해제")
-                    .setMessage("라즈베리파이 가이드 기기와의 블루투스 연결을 완전히 끊으시겠습니까?\n해제 시 웨어러블 장치들이 초기화(대기동작)됩니다.")
+                    .setMessage("라즈베리파이 가이드 기기와의 블루투스 연결을 완전히 끊으시겠습니까?\n해제 시 웨어러블 장치들이 초기화(대기동작)되며 경로 안내가 종료됩니다.")
                     .setPositiveButton("연결 끊기", (dialog, which) -> {
+
                         BleManager.getInstance().forceBleDisconnect();
+                        isGuiding = false;
+                        viewModel.setGuidingState(false);
+                        viewModel.cancelRouteGuidance();
+
+                        if (isMapReady && tMapView != null) {
+                            tMapView.removeAllTMapPolyLine();
+                            tMapView.invalidate();
+                        }
+
+                        searchController.setText("");
+                        btnCancel.setVisibility(View.GONE);
+                        if (tvNavigationMsg != null) {
+                            tvNavigationMsg.setText("안내를 시작하려면 목적지를 입력하세요.");
+                        }
                     })
                     .setNegativeButton("연결 유지", null)
                     .show();
@@ -265,7 +285,16 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
             startActivity(intent);
         });
     }
-
+    private void attemptBleConnection() {
+        String savedMac = PreferenceManager.getBleDeviceAddress(this);
+        if (savedMac != null) {
+            viewModel.bleConnectionState.setValue(1);
+            BleManager.getInstance().connectByMac(this, savedMac);
+            Toast.makeText(this, "저장된 기기로 연결을 시도합니다.", Toast.LENGTH_SHORT).show();
+        } else {
+            showBleScanDialog();
+        }
+    }
     private void onDestinationArrived() {
         Toast.makeText(this, "목적지에 도착했습니다. 가이드를 안전 종료합니다.", Toast.LENGTH_LONG).show();
         isGuiding = false;
@@ -276,6 +305,14 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
     }
 
     private void showBleScanDialog() {
+        String savedMac = PreferenceManager.getBleDeviceAddress(this);
+        if (savedMac != null) {
+            viewModel.bleConnectionState.setValue(1);
+            BleManager.getInstance().connectByMac(this, savedMac);
+            Toast.makeText(this, "저장된 기기로 연결을 시도합니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         scannedBleDevices.clear();
         bleDeviceListAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);
 
@@ -284,6 +321,9 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         builder.setAdapter(bleDeviceListAdapter, (dialog, which) -> {
             BleManager.getInstance().stopScan();
             BluetoothDevice selectedDevice = scannedBleDevices.get(which);
+
+            PreferenceManager.saveBleDeviceAddress(MainActivity.this, selectedDevice.getAddress());
+
             viewModel.bleConnectionState.setValue(1);
             BleManager.getInstance().connect(MainActivity.this, selectedDevice);
         });
@@ -415,7 +455,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener,
         viewModel.updateLocation(lat, lng);
         if (!isMapReady || tMapView == null) return;
 
-        // GPS 연동 위치 동기화
         tMapView.setCenterPoint(lat, lng);
 
         if (ivCustomUserMarker != null && ivCustomUserMarker.getVisibility() == View.GONE) {
