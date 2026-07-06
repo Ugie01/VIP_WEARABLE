@@ -46,7 +46,7 @@ def analyze_terrain(class_map, pitch_offset=0):
         
     return raw_status, road_score, sidewalk_score, crosswalk_score
 
-def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING,g_ANGLE_OK):
+def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING,g_ANGLE_OK, shared_queue):
     print("🔍 [sem.py] 시맨틱 세그멘테이션 AI 엔진 가동...")
     
     try:

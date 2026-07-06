@@ -8,7 +8,7 @@ import basic.config as config
 import basic.handler as handler
 from utils import FPSCalculator, calculate_avoidance_direction
 
-def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST, g_ANGLE_OK):
+def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST, g_ANGLE_OK, shared_queue):
     print("🔍 [od.py] 정적 객체 3방향 회피 AI 엔진 가동 (모듈화 완료)...")
     
     try:
@@ -28,7 +28,7 @@ def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST, g_ANGLE_OK
     model = YOLO(YOLO_OD_PATH, task="detect")
     fps_calc = FPSCalculator(interval=1.0)
 
-    # 💡 [초기값 설정]: 시작할 때 기본 상태를 3(중앙)으로 인지시킵니다.
+    # 시작할 때 기본 상태를 3(중앙)으로 인지시킵니다.
     prev_direction = 3
 
     try:

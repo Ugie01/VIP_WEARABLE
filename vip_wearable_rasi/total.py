@@ -5,7 +5,8 @@ import cv2
 import numpy as np
 import torch
 import subprocess
-from multiprocessing import Process, shared_memory, freeze_support
+from multiprocessing import Process, shared_memory, freeze_support, Queue
+from basic import ble_core
 import basic.config as config
 import basic.g_val as g
 from utils import process_navigation_vibration
@@ -13,6 +14,7 @@ from utils import process_navigation_vibration
 from od import run_object_detection
 from sem import run_segmentation
 from basic.ble_core import reset_hardware_to_sleep, run_ble_server_process
+import basic.handler as handler # 상단 임포트 확인
 
 # utils에서 가공할 타이머 콜백을 여기서 래핑하거나 직접 구현
 def timer_handler(signum, frame):
@@ -21,7 +23,6 @@ def timer_handler(signum, frame):
     백그라운드에서 독립적으로 호출하는 인터럽트 함수입니다.
     """
     print(g.ANGLE_VALUE.value)
-    # angle = 3.0  # g_val에 정의된 멀티프로세스 공유 변수 활용
     angle = g.ANGLE_VALUE.value  # 공유 메모리에서 현재 각도
     if angle != 0.0:
         process_navigation_vibration(angle)
@@ -43,20 +44,25 @@ def main():
 
     # 자식 AI 엔진들 및 BLE 엔진 멀티코어 병렬 구동 시작
     print("[main.py] 자식 AI 엔진 및 통신 서버 병렬 프로세스 생성 중...")
+    # 1. 프로세스 간 데이터 통신용 공용 큐 생성
+    shared_queue = Queue()
     
+    # 2. ble_core 모듈에 큐 등록
+    ble_core.init_ai_queue(shared_queue)
+    handler.init_handler_queue(shared_queue)
     # 비동기 BLE 서버를 백그라운드 프로세스로 분리 생성
-    ble_process = Process(target=run_ble_server_process,args=(g.g_SERIAL,), daemon=True)
+    ble_process = Process(target=run_ble_server_process,args=(shared_queue,), daemon=True)
     ble_process.start()
 
     # Windows(spawn) 환경에서는 인자로 넘겨받은 동기화 객체를 자식이 고유하게 바인딩합니다.
     od_process = Process(
         target=run_object_detection, 
-        args=(g.FRAME_OK, g.OD_PROCESSING, g.OBJECT_EXIST, g.ANGLE_OK),
+        args=(g.FRAME_OK, g.OD_PROCESSING, g.OBJECT_EXIST, g.ANGLE_OK, shared_queue),
         daemon=True
     )
     sem_process = Process(
         target=run_segmentation, 
-        args=(g.FRAME_OK, g.SEM_PROCESSING, g.ANGLE_OK),
+        args=(g.FRAME_OK, g.SEM_PROCESSING, g.ANGLE_OK, shared_queue),
         daemon=True
     )
     
