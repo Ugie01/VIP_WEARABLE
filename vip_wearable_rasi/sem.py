@@ -46,17 +46,17 @@ def analyze_terrain(class_map, pitch_offset=0):
         
     return raw_status, road_score, sidewalk_score, crosswalk_score
 
-def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING):
-    print("🔍 [sem.py] 시맨틱 세그멘테이션 AI 엔진 가동...")
+def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING, g_PITCH):
+    print("[sem.py] 시맨틱 세그멘테이션 AI 엔진 가동...")
     
     try:
         shm = shared_memory.SharedMemory(name=config.VIDEO_SHM_NAME)
         raw_buf = shm.buf
     except FileNotFoundError:
-        print(f"❌ 공유 메모리를 찾을 수 없습니다.")
+        print(f"[sem.py] 공유 메모리를 찾을 수 없습니다.")
         return
 
-    # 🚀 플래그 기반 조건부 윈도우 개설
+    # 플래그 기반 조건부 윈도우 개설
     if config.SHOW_DISPLAY:
         cv2.namedWindow("SEM Watcher", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("SEM Watcher", 320, 256)
@@ -93,7 +93,7 @@ def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING):
                         handler.handle_surface_changed(0.0, target_id=2, direction_id=1)
                     prev_status = fixed_status
 
-            # 🚀 [핵심 수정] 플래그가 True일 때만 시각화 연산 수행
+            # 플래그가 True일 때만 시각화 연산 수행
             if config.SHOW_DISPLAY:
                 annotated_frame = results[0].plot(boxes=False)
                 fps_calc.update()
@@ -106,7 +106,7 @@ def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING):
                 fps_calc.update()
                 
     except KeyboardInterrupt:
-        print("\n👋 sem.py 안전 종료.")
+        print("\n[sem.py] sem.py 안전 종료.")
     finally:
         shm.close()
         if config.SHOW_DISPLAY:
