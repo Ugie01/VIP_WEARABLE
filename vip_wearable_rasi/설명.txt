@@ -1,8 +1,0 @@
-포트 권한 설정
-sudo usermod -aG dialout $USER
-sudo systemctl stop serial-getty@ttyS0.service
-sudo systemctl disable serial-getty@ttyS0.service
-sudo chmod 666 /dev/ttyS0
-newgrp dialout
-
-
