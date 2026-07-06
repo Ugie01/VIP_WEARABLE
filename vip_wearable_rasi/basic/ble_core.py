@@ -13,10 +13,10 @@ import basic.config as config
 latest_stm32_yaw = 0.0
 has_st_awakened = False
 last_rx_packet_time = 0.0
-global_ser = None
+g_SERIAL = None
 
 def reset_hardware_to_sleep():
-    global has_st_awakened, latest_stm32_yaw, global_ser
+    global has_st_awakened, latest_stm32_yaw
     if has_st_awakened:
         has_st_awakened = False
         print("\n==================================================")
@@ -25,29 +25,28 @@ def reset_hardware_to_sleep():
         print("==================================================")
         send_control_flag_to_stm32(0x00)
         config.latest_stm32_yaw = 0.0
-        if global_ser and global_ser.is_open:
-            global_ser.reset_input_buffer()
+        if g_SERIAL and g_SERIAL.is_open:
+            g_SERIAL.reset_input_buffer()
 
 def send_control_flag_to_stm32(flag_value):
-    global global_ser
-    if global_ser and global_ser.is_open:
-        try:
-            packet = bytearray([0xAA]) + struct.pack('!f', 0.0) + bytearray([flag_value])
-            global_ser.write(packet)
-            global_ser.flush()
-            status_text = "구동(Wake)" if flag_value == 0x01 else "대기/초기화(Sleep)"
-            print(f"[ble_core.py] ST 보드로 {status_text} 명령 플래그({hex(flag_value)}) 전송 완료.")
-        except Exception as e:
-            print(f"[ble_core.py] 오류: ST 플래그 전파 실패: {e}")
+    
+    try:
+        packet = bytearray([0xAA]) + struct.pack('!f', 0.0) + bytearray([flag_value]) + bytearray([0x00])
+        g_SERIAL.write(packet)
+        g_SERIAL.flush()
+        status_text = "구동(Wake)" if flag_value == 0x01 else "대기/초기화(Sleep)"
+        print(f"[ble_core.py] ST 보드로 {status_text} 명령 플래그({hex(flag_value)}) 전송 완료.")
+    except Exception as e:
+        print(f"[ble_core.py] 오류: ST 플래그 전파 실패: {e}")
 
-def send_angle_error_to_stm32(angle_error):
-    global global_ser
-    if global_ser and global_ser.is_open:
-        try:
-            packet = bytearray([0xAA]) + struct.pack('!f', angle_error) + bytearray([0x01])
-            global_ser.write(packet)
-        except Exception as e:
-            print(f"[ble_core.py] 오류: ST 오차 데이터 전파 실패: {e}")
+def send_angle_error_to_stm32(angle_error, state):
+    
+    try:
+        packet = bytearray([0xAA]) + struct.pack('!f', angle_error) + bytearray([0x01]) + bytearray([state])
+        g_SERIAL.write(packet)
+        g_SERIAL.flush()
+    except Exception as e:
+        print(f"[하드웨어 제어 오류] ST 오차 데이터 전파 실패: {e}")
 
 class TrackerGattService(Service):
     def __init__(self):
@@ -67,7 +66,7 @@ class TrackerGattService(Service):
         global has_st_awakened, last_rx_packet_time
         try:
             if len(value) == 5 and value[0] == 0x22:
-                angle_error = struct.unpack('!f', value[1:5])[0]
+                g.ANGLE_VALUE.value = struct.unpack('!f', value[1:5])[0]
                 last_rx_packet_time = time.time()
 
                 if not has_st_awakened:
@@ -75,15 +74,13 @@ class TrackerGattService(Service):
                     print("\n==================================================")
                     print("[ble_core.py] 앱 연동 성공")
                     print("==================================================")
-                    if global_ser and global_ser.is_open:
-                        global_ser.reset_input_buffer()
+                    if g_SERIAL and g_SERIAL.is_open:
+                        g_SERIAL.reset_input_buffer()
                     send_control_flag_to_stm32(0x01)
 
-                send_angle_error_to_stm32(angle_error)
-
-                if angle_error != 0.0:
-                    direction = "오른쪽" if angle_error > 0 else "왼쪽"
-                    print(f"[ble_core.py] 수신: 앱 경로 편차 오차: {angle_error:.1f}° -> {direction} 보정 확인          ", end="\n\r")
+                if g.ANGLE_VALUE.value != 0.0:
+                    direction = "오른쪽" if g.ANGLE_VALUE.value > 0 else "왼쪽"
+                    print(f"[ble_core.py] 수신: 앱 경로 편차 오차: {g.ANGLE_VALUE.value:.1f}° -> {direction} 보정 확인          ", end="\n\r")
             else:
                 print(f"\n[ble_core.py] 경고: 앱 통신 규격 부적합 프로토콜 유입 무효화: {value.hex()}")
         except Exception as e:
@@ -112,11 +109,11 @@ def force_kernel_advertising():
         print(f"[ble_core.py] BLE 광고 송출 실패: {e}")
 
 async def read_stm32_uart_loop():
-    global latest_stm32_yaw, global_ser, has_st_awakened
+    global latest_stm32_yaw, has_st_awakened
 
     print(f"[하드웨어] STM32 수신용 UART 채널 바인딩 가동 ({config.UART_PORT}, {config.BAUDRATE}bps)")
     try:
-        global_ser = serial.Serial(config.UART_PORT, baudrate=config.BAUDRATE, timeout=0.1)
+        g_SERIAL = serial.Serial(config.UART_PORT, baudrate=config.BAUDRATE, timeout=0.1)
     except Exception as e:
         print(f"[ble_core.py] 오류: UART 포트 개방 실패 (권한 누락 또는 장치 없음): {e}")
         return
@@ -124,22 +121,22 @@ async def read_stm32_uart_loop():
     while True:
         try:
             if not has_st_awakened:
-                if global_ser.is_open and global_ser.in_waiting > 0:
-                    global_ser.reset_input_buffer()
+                if g_SERIAL.is_open and g_SERIAL.in_waiting > 0:
+                    g_SERIAL.reset_input_buffer()
                 await asyncio.sleep(0.1)
                 continue
 
-            if global_ser.is_open and global_ser.in_waiting >= 5:
-                header = global_ser.read(1)
+            if g_SERIAL.is_open and g_SERIAL.in_waiting >= 5:
+                header = g_SERIAL.read(1)
                 if header == b'\xaa':
-                    payload = global_ser.read(4)
+                    payload = g_SERIAL.read(4)
                     parsed_yaw = struct.unpack('<f', payload)[0]
-                    payload = global_ser.read(4)
+                    payload = g_SERIAL.read(4)
                     parsed_pitch = struct.unpack('<f', payload)[0]
                     
                     if -180.0 <= parsed_yaw <= 180.0:
                         latest_stm32_yaw = parsed_yaw
-                    if -180.0 <= parsed_pitch <= 180.0:
+                    if -90.0 <= parsed_pitch <= 90.0:
                         g.PITCH = parsed_pitch
                         
         except Exception as e:
@@ -225,14 +222,14 @@ async def async_ble_main():
         track_software_heartbeat_timeout()
     )
 
-def run_ble_server_process():
+def run_ble_server_process(g_SERIAL):
     try:
         asyncio.run(async_ble_main())
     except KeyboardInterrupt:
         print("\n[ble_core.py] BLE 서버 인터럽트 감지 및 가이드 서버 종료 중...")
         has_st_awakened = True
         reset_hardware_to_sleep()
-        if global_ser and global_ser.is_open:
-            global_ser.close()
+        if g_SERIAL and g_SERIAL.is_open:
+            g_SERIAL.close()
         subprocess.run(["sudo", "btmgmt", "--index", "0", "clr-adv"], capture_output=True)
         sys.exit(0)

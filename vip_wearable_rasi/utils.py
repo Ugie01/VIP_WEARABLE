@@ -207,3 +207,35 @@ class FPSCalculator:
             self.last_update = now
             
         return self.current_fps
+    
+import basic.handler as handler
+def process_navigation_vibration(angle: float):
+    """
+    정훈 님의 아이디어를 반영하여 방향 판정과 상태 변경 처리를 
+    하나의 if-elif-else 구조로 묶어 최적화한 함수입니다.
+    """
+    # global prev_nav_direction
+
+    # 1. 입력 각도 안전 범위 제한 (-90 ~ 90도)
+    clipped_angle = max(-90.0, min(90.0, angle))
+
+    # 2. [핵심 최적화]: 방향 판정과 상태 변경 조건을 하나의 if-elif-else문으로 결합
+    if clipped_angle > 10.0: 
+        # 오른쪽으로 이탈했고(지시 방향은 1:왼쪽), 직전 상태와 다를 때만 실행
+        # if prev_nav_direction != 1:
+            vibe_val = min(100, int(clipped_angle * 1.11))
+            handler.handle_path_deviation(val=float(vibe_val), target_id=0, direction_id=1)
+            # prev_nav_direction = 1
+            
+    elif clipped_angle < -10.0:
+        # 왼쪽으로 이탈했고(지시 방향은 2:오른쪽), 직전 상태와 다를 때만 실행
+        # if prev_nav_direction != 2:
+            vibe_val = max(-100, int(clipped_angle * 1.11))
+            handler.handle_path_deviation(val=float(vibe_val), target_id=0, direction_id=2)
+            # prev_nav_direction = 2
+            
+    else:
+        # 정상 범위(-10 ~ 10도)로 돌아왔고, 직전 상태가 중앙(3)이 아니었을 때만 1회 실행
+        # if prev_nav_direction != 3:
+            handler.handle_path_deviation(val=0.0, target_id=0, direction_id=3)
+            # prev_nav_direction = 3

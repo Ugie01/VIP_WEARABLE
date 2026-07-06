@@ -8,14 +8,14 @@ import basic.config as config
 import basic.handler as handler
 from utils import FPSCalculator, calculate_avoidance_direction
 
-def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST):
-    print("[od.py] 정적 객체 3방향 회피 AI 엔진 가동 (모듈화 완료)...")
+def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST, g_ANGLE_OK):
+    print("🔍 [od.py] 정적 객체 3방향 회피 AI 엔진 가동 (모듈화 완료)...")
     
     try:
         shm = shared_memory.SharedMemory(name=config.VIDEO_SHM_NAME)
         raw_buf = shm.buf
     except FileNotFoundError:
-        print("[od.py] 공유 메모리를 찾을 수 없습니다. main.py 상태를 확인하세요.")
+        print(f"❌ 공유 메모리를 찾을 수 없습니다. main.py 상태를 확인하세요.")
         return
 
     if config.SHOW_DISPLAY:
@@ -28,41 +28,20 @@ def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST):
     model = YOLO(YOLO_OD_PATH, task="detect")
     fps_calc = FPSCalculator(interval=1.0)
 
+    # 💡 [초기값 설정]: 시작할 때 기본 상태를 3(중앙)으로 인지시킵니다.
+    prev_direction = 3
+
     try:
         while True:
             if not g_FRAME_OK.value or not g_OD_PROCESSING.value:
                 time.sleep(0.001)
-                continue
+                continue  # 🌟 아래의 model(frame) 주입부로 내려가지 않고 위로 돌려보냄
             
             # 공유 메모리 버퍼로부터 이미지 뷰 직접 바인딩 (Zero-Copy)
             frame = np.frombuffer(raw_buf, dtype=np.uint8)[:config.FRAME_SIZE].reshape((config.HEIGHT, config.WIDTH, config.CHANNELS))
             g_OD_PROCESSING.value = False
 
-            results = model(
-                frame, 
-                imgsz=[256, 320], 
-                classes=STATIC_CLASSES, 
-                verbose=False,
-                conf=0.60,
-                max_det=5,               # 동시에 최대 5개의 정적 장애물 스캔
-            )
-            """
-            단일객체 회피 알고리즘 (기존)
-            """
-            # if results[0].boxes is not None and len(results[0].boxes) > 0:
-            #     g_OBJECT_EXIST.value = True
-            #     for box in results[0].boxes:
-            #         x1, y1, x2, y2 = box.xyxy[0]
-            #         box_width, box_height = x2 - x1, y2 - y1
-            #         area_ratio = (box_width * box_height) / (config.WIDTH * config.HEIGHT)
-                    
-            #         if area_ratio > 0.8:
-            #             left_area = x1 * config.HEIGHT
-            #             right_area = (config.WIDTH - x2) * config.HEIGHT
-            #             direction_id = 2 if left_area > right_area else 1
-            #             handler.handle_static_object_avoidance(area_ratio, target_id=0, direction_id=direction_id)
-            # else:
-            #     g_OBJECT_EXIST.value = False
+            results = model(frame, imgsz=[256, 320], classes=STATIC_CLASSES, verbose=False, conf=0.60, max_det=5)
 
             if results[0].boxes is not None and len(results[0].boxes) > 0:
                 g_OBJECT_EXIST.value = True
@@ -74,11 +53,24 @@ def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST):
                     config.HEIGHT
                 )
 
-                # 위험도가 임계치를 넘었을 때만 핸들러를 호출하도록 함수 바깥에서 유연하게 제어
+                # 위험도가 임계치를 넘었을 때만 조향 트리거 작동
                 if total_score > 0.3:
-                    handler.handle_static_object_avoidance(total_score, target_id=0, direction_id=direction_id)
+                    if direction_id != prev_direction:
+                        handler.handle_static_object_avoidance(total_score, target_id=0, direction_id=direction_id)
+                        prev_direction = direction_id  # 현재 회피 방향 기록 (1: 왼쪽, 2: 오른쪽, 3: 중앙)
+                else:
+                    # 위험도가 존재하나 임계치 이하로 떨어지면 디폴트 상태(3: 중앙)로 전환 판단
+                    if prev_direction != 3:
+                        handler.handle_static_object_avoidance(total_score, target_id=0, direction_id=3)
+                        prev_direction = 3
             else:
                 g_OBJECT_EXIST.value = False
+                
+                # 💡 [핵심 수정]: 객체가 완전히 사라진(else) 순간에도 함수를 호출합니다!
+                # 직전 프레임까지 회피(1 또는 2) 중이었다가 사라진 것이라면 중앙 복귀 함수를 실행합니다.
+                if prev_direction != 3:
+                    handler.handle_static_object_avoidance(0.0, target_id=0, direction_id=3)
+                    prev_direction = 3  # 상태를 중앙으로 고정하여 중복 호출 방지
 
             if config.SHOW_DISPLAY:
                 annotated_frame = results[0].plot()
@@ -92,7 +84,7 @@ def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST):
                 fps_calc.update()
                 
     except KeyboardInterrupt:
-        print("\n[od.py] od.py 안전 종료.")
+        print("\n👋 od.py 안전 종료.")
     finally:
         shm.close()
         if config.SHOW_DISPLAY:

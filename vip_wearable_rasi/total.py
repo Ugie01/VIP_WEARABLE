@@ -1,3 +1,4 @@
+import signal
 import time
 import sys
 import cv2
@@ -7,10 +8,25 @@ import subprocess
 from multiprocessing import Process, shared_memory, freeze_support
 import basic.config as config
 import basic.g_val as g
+from utils import process_navigation_vibration
 
 from od import run_object_detection
 from sem import run_segmentation
-from basic.ble_core import run_ble_server_process
+from basic.ble_core import reset_hardware_to_sleep, run_ble_server_process
+
+# utils에서 가공할 타이머 콜백을 여기서 래핑하거나 직접 구현
+def timer_handler(signum, frame):
+    """
+    OS가 config.TIMER_INTERVAL(예: 0.1초) 마다 메인 루프를 방해하지 않고 
+    백그라운드에서 독립적으로 호출하는 인터럽트 함수입니다.
+    """
+    print(g.ANGLE_VALUE.value)
+    # angle = 3.0  # g_val에 정의된 멀티프로세스 공유 변수 활용
+    angle = g.ANGLE_VALUE.value  # 공유 메모리에서 현재 각도
+    if angle != 0.0:
+        process_navigation_vibration(angle)
+    # print(f"⏰ [타이머 인터럽트] 현재 각도({current_angle}) 기준 방향 및 진동 제어 연산 중...")
+
 
 def main():
     print("[main.py] 보행 보조 시스템 중앙 컨트롤러 가동 (Windows/Linux 공용 모드)...")
@@ -29,23 +45,26 @@ def main():
     print("[main.py] 자식 AI 엔진 및 통신 서버 병렬 프로세스 생성 중...")
     
     # 비동기 BLE 서버를 백그라운드 프로세스로 분리 생성
-    ble_process = Process(target=run_ble_server_process, daemon=True)
+    ble_process = Process(target=run_ble_server_process,args=(g.g_SERIAL,), daemon=True)
     ble_process.start()
 
+    # Windows(spawn) 환경에서는 인자로 넘겨받은 동기화 객체를 자식이 고유하게 바인딩합니다.
     od_process = Process(
         target=run_object_detection, 
-        args=(g.FRAME_OK, g.OD_PROCESSING, g.OBJECT_EXIST),
+        args=(g.FRAME_OK, g.OD_PROCESSING, g.OBJECT_EXIST, g.ANGLE_OK),
         daemon=True
     )
     sem_process = Process(
         target=run_segmentation, 
-        args=(g.FRAME_OK, g.SEM_PROCESSING, g.PITCH),
+        args=(g.FRAME_OK, g.SEM_PROCESSING, g.ANGLE_OK),
         daemon=True
     )
     
     od_process.start()
     sem_process.start()
     print("[main.py] AI 분석 병렬 프로세스 및 BLE 통신 서버가 백그라운드에서 정상 가동을 시작했습니다.")
+    signal.signal(signal.SIGALRM, timer_handler)
+    signal.setitimer(signal.ITIMER_REAL, 1.0, config.TIMER_INTERVAL)
 
     # 웹캠 하드웨어 인터페이스 오픈 설정
     camera_index = 0
@@ -57,6 +76,7 @@ def main():
         od_process.terminate()
         sem_process.terminate()
         ble_process.terminate()
+        reset_hardware_to_sleep()
         shm.close()
         shm.unlink()
         sys.exit(1)
@@ -97,6 +117,7 @@ def main():
         od_process.terminate()
         sem_process.terminate()
         ble_process.terminate() # BLE 프로세스도 함께 종료
+        reset_hardware_to_sleep()
         shm.close()
         try:
             shm.unlink()

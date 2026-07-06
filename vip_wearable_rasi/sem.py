@@ -46,17 +46,17 @@ def analyze_terrain(class_map, pitch_offset=0):
         
     return raw_status, road_score, sidewalk_score, crosswalk_score
 
-def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING, g_PITCH):
-    print("[sem.py] 시맨틱 세그멘테이션 AI 엔진 가동...")
+def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING,g_ANGLE_OK):
+    print("🔍 [sem.py] 시맨틱 세그멘테이션 AI 엔진 가동...")
     
     try:
         shm = shared_memory.SharedMemory(name=config.VIDEO_SHM_NAME)
         raw_buf = shm.buf
     except FileNotFoundError:
-        print(f"[sem.py] 공유 메모리를 찾을 수 없습니다.")
+        print(f"❌ 공유 메모리를 찾을 수 없습니다.")
         return
 
-    # 플래그 기반 조건부 윈도우 개설
+    # 🚀 플래그 기반 조건부 윈도우 개설
     if config.SHOW_DISPLAY:
         cv2.namedWindow("SEM Watcher", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("SEM Watcher", 320, 256)
@@ -70,9 +70,10 @@ def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING, g_PITCH):
 
     try:
         while True:
-            if not g_FRAME_OK.value or not g_SEM_PROCESSING.value:
+            # 💡 [핵심 수정]: continue가 추가되어 조건 만족 시 아래의 모든 추론 연산을 생략합니다.
+            if not g_FRAME_OK.value or not g_SEM_PROCESSING.value:                
                 time.sleep(0.001)
-                continue  
+                continue  # 🌟 아래의 model(frame) 주입부로 내려가지 않고 위로 돌려보냄
 
             frame = np.frombuffer(raw_buf, dtype=np.uint8)[:config.FRAME_SIZE].reshape((config.HEIGHT, config.WIDTH, config.CHANNELS))
             g_SEM_PROCESSING.value = False 
@@ -93,7 +94,7 @@ def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING, g_PITCH):
                         handler.handle_surface_changed(0.0, target_id=2, direction_id=1)
                     prev_status = fixed_status
 
-            # 플래그가 True일 때만 시각화 연산 수행
+            # 🚀 [핵심 수정] 플래그가 True일 때만 시각화 연산 수행
             if config.SHOW_DISPLAY:
                 annotated_frame = results[0].plot(boxes=False)
                 fps_calc.update()
@@ -106,7 +107,7 @@ def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING, g_PITCH):
                 fps_calc.update()
                 
     except KeyboardInterrupt:
-        print("\n[sem.py] sem.py 안전 종료.")
+        print("\n👋 sem.py 안전 종료.")
     finally:
         shm.close()
         if config.SHOW_DISPLAY:

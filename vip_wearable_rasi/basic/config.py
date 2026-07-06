@@ -1,5 +1,16 @@
+
 # basic/config.py
 import struct
+import cv2
+import onnxruntime as ort
+
+# 1. 라즈베리파이 5의 4개 코어를 모두 쓰도록 멀티스레딩 및 그래프 최적화 설정
+options = ort.SessionOptions()
+options.intra_op_num_threads = 4  # 라즈베리파이 5 CPU 코어 개수에 맞춤
+options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+TIMER_INTERVAL = 1
+
 
 VIDEO_SHM_NAME = "assist_video_shm"
 WIDTH = 320
@@ -7,7 +18,7 @@ HEIGHT = 256
 CHANNELS = 3
 FRAME_SIZE = WIDTH * HEIGHT * CHANNELS
 
-CAMERA_BACKEND = 0  
+CAMERA_BACKEND = cv2.CAP_V4L2    
 CAMERA_BUFFER_SIZE = 1  
 
 PACKET_FORMAT = "!BfBB"

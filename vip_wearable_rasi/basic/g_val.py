@@ -8,4 +8,7 @@ SEM_PROCESSING = Value('b', True)
 OBJECT_EXIST = Value('b', False)
 ANGLE_LEFT_RIGHT = Value('b', False)
 ANGLE_OK = Value('b', False)
+ANGLE_VALUE = Value('f', 0.0)
 PITCH = Value('f', 0.0)
+
+g_SERIAL = Value('i', 0)  # 시리얼 포트 번호를 공유하는 전역 변수
