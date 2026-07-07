@@ -7,10 +7,10 @@ from multiprocessing import shared_memory
 import basic.config as config
 import basic.handler as handler
 from utils import FPSCalculator, calculate_avoidance_direction
-import signal
-
+import torch
 
 def run_object_detection(g_FRAME_OK, g_OD_PROCESSING, g_OBJECT_EXIST, g_ANGLE_OK, shared_queue):
+    torch.set_num_threads(1) 
     print("🔍 [od.py] 정적 객체 3방향 회피 AI 엔진 가동 (모듈화 완료)...")
     
     try:

@@ -6,7 +6,7 @@ import onnxruntime as ort
 
 # 1. 라즈베리파이 5의 4개 코어를 모두 쓰도록 멀티스레딩 및 그래프 최적화 설정
 options = ort.SessionOptions()
-options.intra_op_num_threads = 4  # 라즈베리파이 5 CPU 코어 개수에 맞춤
+options.intra_op_num_threads = 1  
 options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
 TIMER_INTERVAL = 1

@@ -10,3 +10,6 @@ ANGLE_LEFT_RIGHT = Value('b', False)
 ANGLE_OK = Value('b', False)
 ANGLE_VALUE = Value('f', 0.0)
 PITCH = Value('f', 0.0)
+
+# basic/g_val.py 의 맨 아래 추가
+BLE_CONNECTED = Value('b', False) # BLE 연결 상태를 공유하는 플래그

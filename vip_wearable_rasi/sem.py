@@ -8,6 +8,7 @@ from collections import deque, Counter
 import basic.config as config  
 import basic.handler as handler
 from utils import FPSCalculator
+import torch
 
 class CurrentLocationStatus:
     def __init__(self, window_size=15, min_stabilize_size=5):
@@ -47,6 +48,7 @@ def analyze_terrain(class_map, pitch_offset=0):
     return raw_status, road_score, sidewalk_score, crosswalk_score
 
 def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING,g_ANGLE_OK, shared_queue):
+    torch.set_num_threads(1) 
     print("🔍 [sem.py] 시맨틱 세그멘테이션 AI 엔진 가동...")
     
     try:

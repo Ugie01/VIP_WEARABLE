@@ -51,9 +51,15 @@ def reset_hardware_to_sleep():
     global has_st_awakened, latest_stm32_yaw, global_serial
     if has_st_awakened:
         has_st_awakened = False
+        
+        # 앱과 연결이 끊기면 즉시 AI 영상 분석을 멈추도록 플래그 해제
+        g.BLE_CONNECTED.value = False 
+        g.ANGLE_VALUE.value = 0.0
+        g.ANGLE_OK.value = False
+        
         print("\n==================================================")
         print("[ble_core.py] 연결 단절 조치 및 대기 모드 진입")
-        print("ST 보드를 슬립 모드(0x00)로 리셋")
+        print("ST 보드를 슬립 모드(0x00)로 리셋 및 AI 비전 분석 중단")
         print("==================================================")
         send_control_flag_to_stm32(0x00)
         config.latest_stm32_yaw = 0.0
@@ -79,12 +85,10 @@ def send_control_flag_to_stm32(flag_value):
 def send_angle_error_to_stm32(angle_error, state):
     global global_serial, has_st_awakened
     
-    # 방어 코드 1: 객체 None 체크 및 오픈 여부 확인 (에러 차단)
     if global_serial is None or not global_serial.is_open:
         print("[하드웨어 제어 오류] 시리얼 포트가 연결되지 않은 상태입니다.")
         return
 
-    # 방어 코드 2: 보드 활성화 여부 확인
     if not has_st_awakened:
         global_serial.reset_input_buffer()
         print("[ble_core.py] 경고: ST 보드가 활성화되지 않은 상태에서 오차 전송 시도. 무시합니다.")
@@ -120,8 +124,12 @@ class TrackerGattService(Service):
 
                 if not has_st_awakened:
                     has_st_awakened = True
+                    
+                    # 앱과 통신 성공 시 AI 영상 분석을 시작하도록 플래그 활성화
+                    g.BLE_CONNECTED.value = True 
+                    
                     print("\n==================================================")
-                    print("[ble_core.py] 앱 연동 성공")
+                    print("[ble_core.py] 앱 연동 성공! AI 비전 분석 및 ST 제어 활성화")
                     print("==================================================")
                     if global_serial and global_serial.is_open:
                         global_serial.reset_input_buffer()
@@ -168,7 +176,7 @@ async def read_stm32_uart_loop():
                 await asyncio.sleep(0.1)
                 continue
 
-            if global_serial and global_serial.is_open and global_serial.in_waiting >= 9: # 1(Header) + 4(Yaw) + 4(Pitch) = 총 9바이트 대기 확인
+            if global_serial and global_serial.is_open and global_serial.in_waiting >= 9: 
                 header = global_serial.read(1)
                 if header == b'\xaa':
                     payload = global_serial.read(4)
@@ -179,7 +187,7 @@ async def read_stm32_uart_loop():
                     if -180.0 <= parsed_yaw <= 180.0:
                         latest_stm32_yaw = parsed_yaw
                     if -90.0 <= parsed_pitch <= 90.0:
-                        g.PITCH = parsed_pitch
+                        g.PITCH.value = parsed_pitch
                         
         except Exception as e:
             print(f"\n[ble_core.py] 오류: UART 통신 오류, 데이터 스트림 무효화: {e}")
@@ -244,7 +252,7 @@ async def async_ble_main():
     print("[ble_core.py] 3단계: GATT 서비스 스펙트럼 초기화 중...")
     service = TrackerGattService()
     
-    print("[ble_core.py] 4단계: GATT 서비스 서비스 등록 시도 중...")
+    print("[ble_core.py] 4단계: GATT 서비스 등록 시도 중...")
     try:
         await service.register(bus, adapter=adapter, path="/org/bluez/app/service")
         print("[ble_core.py] GATT 데이터 통신 서비스 등록 완료")
@@ -252,7 +260,6 @@ async def async_ble_main():
         print(f"[ble_core.py] 오류: GATT 서비스 등록 에러: {e}")
         return
     
-    # [수정] BLE 이벤트가 돌기 전에 시리얼 포트를 선제적으로 확실히 개방
     print(f"[하드웨어] STM32용 UART 채널 바인딩 가동 ({config.UART_PORT}, {config.BAUDRATE}bps)")
     try:
         global_serial = serial.Serial(config.UART_PORT, baudrate=config.BAUDRATE, timeout=0.1)
@@ -263,9 +270,9 @@ async def async_ble_main():
     force_kernel_advertising()
     
     print("==================================================")
-    print("라즈베리파이5 고속 BLE 가이드 서버")
+    print("라즈베리파이 고속 BLE 가이드 서버")
     print("==================================================")
-    print("[ble_core.py] 앱으로부터 스캔 및 연결 바인딩을 기다리는중")
+    print("[ble_core.py] 앱으로부터 스캔 및 연결 바인딩을 기다리는 중...")
     
     await asyncio.gather(
         send_yaw_loop(service),
