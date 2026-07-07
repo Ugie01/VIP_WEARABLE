@@ -31,11 +31,15 @@ async def watch_ai_commands_loop():
         try:
             # 큐에 데이터가 있는지 비동기적으로 확인 (블로킹 방지)
             if ai_tx_queue and not ai_tx_queue.empty():
-                # 데이터 규격: (angle_error, state) 튜플 형태 예시
+                # [0]: 0xAA (헤더)
+                # [1:5]: angle_error (4바이트 float)
+                # [5]: cmd_flag (1바이트)
+                # [6]: fb_flag (1바이트)
                 angle_error, state = ai_tx_queue.get_nowait()
+                st = 0x01 if state else 0x00
                 
                 if global_serial and global_serial.is_open:
-                    packet = bytearray([0xAA]) + struct.pack('!f', angle_error) + bytearray([0x01]) + bytearray([state])
+                    packet = bytearray([0xAA]) + struct.pack('!f', angle_error) + bytearray([0x01]) + bytearray([st])
                     global_serial.write(packet)
                     global_serial.flush()
         except Exception as e:

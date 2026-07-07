@@ -56,9 +56,6 @@ BLE 블루투스 하드웨어 인프라 및 데몬 제어
 # 블루투스 소프트웨어 무선 락 해제
 sudo rfkill unblock bluetooth 
 
-# 안테나 대역폭 독점을 위해 주파수 간섭을 일으키는 Wi-Fi 기능 완전 차단 (안정성 극대화)
-sudo rfkill block wifi
-
 # 물리 블루투스 컨트롤러 장치 인터페이스 강제 기동
 sudo hciconfig hci0 up 
 
@@ -86,3 +83,31 @@ sudo btmgmt advinfo
 bluetoothctl info
 
 ----------------------------------------------------------------------------------------------
+
+# 서비스 실행 상태 확인
+sudo systemctl status bluetooth
+
+# 블루투스 장치 상태 확인 (hciconfig)
+hciconfig
+
+# 블루투스 제어 콘솔 진입
+bluetoothctl -> show
+
+# 블루투스 어댑터 껐다 켜기
+sudo hciconfig hci0 down
+sudo hciconfig hci0 up
+
+# 1. 블루투스 서비스 중지
+sudo systemctl stop bluetooth
+
+# 2. 시스템 D-Bus 데몬 재시작
+sudo systemctl restart dbus
+
+# 3. 블루투스 서비스 다시 시작
+sudo systemctl start bluetooth
+
+# 등록된 모든 BLE 광고 초기화
+sudo btmgmt --index 0 clr-adv
+
+# 블루투스 전원 강제 ON
+sudo btmgmt --index 0 power on
