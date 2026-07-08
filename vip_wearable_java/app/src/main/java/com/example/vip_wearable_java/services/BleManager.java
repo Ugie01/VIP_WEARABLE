@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanSettings;
-import android.os.ParcelUuid;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -90,7 +89,22 @@ public class BleManager {
         }
     }
 
+    public void sendStatePacket(int state) {
+        if (bluetoothGatt == null || writeCharacteristic == null) return;
+        byte[] packet = new byte[2];
+        packet[0] = (byte) 0x33;
+        packet[1] = (byte) state;
+
+        writeCharacteristic.setValue(packet);
+        writeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+        bluetoothGatt.writeCharacteristic(writeCharacteristic);
+        Log.d(TAG, "상태 플래그 [0x33, 0x0" + state + "] 라즈베리파이 전송 완료");
+    }
+
     public void updateGuideState(boolean isGuiding, float currentError) {
+        if (isGuiding && !this.isGuidingRef) {
+            sendStatePacket(2);
+        }
         this.isGuidingRef = isGuiding;
         this.currentErrorRef = currentError;
     }
@@ -98,11 +112,9 @@ public class BleManager {
     public void startScan() {
         if (bleScanner == null) return;
         List<ScanFilter> filters = new ArrayList<>();
-
         ScanSettings settings = new ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build();
-
         bleScanner.startScan(filters, settings, scanCallback);
     }
 
@@ -120,59 +132,52 @@ public class BleManager {
         if (bleScanner == null) return;
         bleScanner.stopScan(scanCallback);
     }
+
     public void stopGuidanceOnly() {
-        Log.d(TAG, "[시퀀스] 주행 안내가 종료되었습니다. BLE 나침반 스트리밍은 유지합니다.");
-        stopTxLoop();
+        Log.d(TAG, "[시퀀스] 주행 안내가 취소/종료되었습니다. 대기 상태(0x01)로 복귀합니다.");
+
+        // 방향값(0x22)을 쏘는 200ms 루프를 먼저 즉각 차단합니다.
         this.isGuidingRef = false;
         this.currentErrorRef = 0.0f;
+
+        // 안드로이드 송신 버퍼가 비워질 시간을 100ms 준 뒤에 0x33을 안전하게 쏩니다.
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            sendStatePacket(1);
+        }, 100);
     }
 
     public void forceBleDisconnect() {
-        Log.d(TAG, "[시퀀스] 사용자가 수동으로 BLE 연결 해제를 요청했습니다. 재연결을 차단합니다.");
+        Log.d(TAG, "[시퀀스] 사용자가 수동으로 연결 해제를 요청했습니다.");
         this.isUserExplicitDisconnect = true;
-        this.connectedDeviceRef = null;
+        sendStatePacket(0);
 
-        stopTxLoop();
-        this.isGuidingRef = false;
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            this.connectedDeviceRef = null;
+            stopTxLoop();
+            this.isGuidingRef = false;
 
-        if (bluetoothGatt != null) {
-            bluetoothGatt.disconnect();
-            bluetoothGatt.close();
-            bluetoothGatt = null;
-        }
-        writeCharacteristic = null;
+            if (bluetoothGatt != null) {
+                bluetoothGatt.disconnect();
+                bluetoothGatt.close();
+                bluetoothGatt = null;
+            }
+            writeCharacteristic = null;
 
-        if (stateCallback != null) {
-            new Handler(Looper.getMainLooper()).post(() ->
-                    stateCallback.onConnectionStateChanged(BluetoothProfile.STATE_DISCONNECTED)
-            );
-        }
+            if (stateCallback != null) {
+                stateCallback.onConnectionStateChanged(BluetoothProfile.STATE_DISCONNECTED);
+            }
+        }, 100);
     }
+
     public void connect(Context context, BluetoothDevice device) {
         stopScan();
         this.isUserExplicitDisconnect = false;
         this.connectedDeviceRef = device;
-        bluetoothGatt = device.connectGatt(context, true, gattCallback);
+        bluetoothGatt = device.connectGatt(context, false, gattCallback);
     }
 
     public void disconnect() {
-        Log.d(TAG, "[시퀀스 1단계] 스마트폰 단에서 수동 연결 해제 프로세스 진입.");
-        updateGuideState(false, 0.0f);
-        sendGuidePacket();
-        stopTxLoop();
-
-        if (bluetoothGatt != null) {
-            bluetoothGatt.disconnect();
-            bluetoothGatt.close();
-            bluetoothGatt = null;
-        }
-
-        writeCharacteristic = null;
-        if (stateCallback != null) {
-            new Handler(Looper.getMainLooper()).post(() ->
-                    stateCallback.onConnectionStateChanged(BluetoothProfile.STATE_DISCONNECTED)
-            );
-        }
+        forceBleDisconnect();
     }
 
     private final ScanCallback scanCallback = new ScanCallback() {
@@ -192,15 +197,21 @@ public class BleManager {
             }
 
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
-                gatt.discoverServices();
+                Log.d(TAG, "BLE 물리적 연결 성공. 600ms 대기 후 MTU 확장을 요청합니다.");
+
+                // 🌟 [핵심 1] 바로 서비스 탐색을 하지 않고, MTU(패킷 크기) 확장을 요청해 안드로이드 스택을 조율합니다.
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (bluetoothGatt != null) {
+                        bluetoothGatt.requestMtu(256);
+                    }
+                }, 600);
+
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 stopTxLoop();
                 writeCharacteristic = null;
 
                 if (!isUserExplicitDisconnect) {
                     Log.d(TAG, "⚠️ [경고] 의도치 않은 블루투스 단절 발생! 자동 재연결 시퀀스를 유지합니다.");
-
                     if (stateCallback != null) {
                         new Handler(Looper.getMainLooper()).post(() ->
                                 stateCallback.onConnectionStateChanged(1)
@@ -215,6 +226,15 @@ public class BleManager {
             }
         }
 
+        // 🌟 [핵심 2] MTU 확장이 완료(또는 실패)된 후에야 비로소 서비스 탐색을 시작합니다.
+        @Override
+        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            Log.d(TAG, "MTU 확장 협상 완료(mtu=" + mtu + "). 서비스 탐색을 시작합니다.");
+            if (bluetoothGatt != null) {
+                bluetoothGatt.discoverServices();
+            }
+        }
+
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -222,7 +242,7 @@ public class BleManager {
                 if (service != null) {
                     BluetoothGattCharacteristic readChar = service.getCharacteristic(CHAR_YAW_NOTIFY_UUID);
                     writeCharacteristic = service.getCharacteristic(CHAR_ERROR_WRITE_UUID);
-                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
+
                     if (readChar != null) {
                         gatt.setCharacteristicNotification(readChar, true);
                         android.bluetooth.BluetoothGattDescriptor descriptor = readChar.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID);
@@ -234,49 +254,32 @@ public class BleManager {
                 }
             }
         }
+
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, android.bluetooth.BluetoothGattDescriptor descriptor, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d("BLE_DEBUG", "Notify 채널 활성화 핸드셰이크 최종 성공. 이제 역송신을 시작합니다.");
+                Log.d(TAG, "Notify 채널 활성화 핸드셰이크 성공. 안드로이드 통신 파라미터 완전 안정화를 위해 1.5초 대기합니다.");
+
+                // 🌟 [핵심 3] 모든 세팅이 끝나고 연결 주기가 완전히 정착될 때까지 1.5초 뜸을 들인 후 첫 패킷 전송
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    sendStatePacket(1);
+                    setTxPeriod(200);
+                }, 1500);
             }
-            setTxPeriod(200);
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             if (CHAR_YAW_NOTIFY_UUID.equals(characteristic.getUuid())) {
                 byte[] data = characteristic.getValue();
-
-                if (data == null) {
-                    Log.d("BLE_DEBUG", " [수신 에러] 로우 데이터 패킷이 null입니다.");
-                    return;
-                }
-
-                StringBuilder sb = new StringBuilder();
-                for (byte b : data) {
-                    sb.append(String.format("%02X ", b));
-                }
-                Log.d("BLE_DEBUG", " [패킷 수신] 길이: " + data.length + " bytes | 데이터(HEX): [ " + sb.toString().trim() + " ]");
-
-                if (data.length != 5) {
-                    Log.d("BLE_DEBUG", " [필터 탈락] 패킷 규격이 5바이트가 아닙니다. (현재: " + data.length + ")");
-                    return;
-                }
-                if (data[0] != (byte) 0x11) {
-                    Log.d("BLE_DEBUG", "❌ [필터 탈락] 헤더 바이트가 0x11이 아닙니다. (현재 헤더: 0x" + String.format("%02X", data[0]) + ")");
-                    return;
-                }
+                if (data == null || data.length != 5 || data[0] != (byte) 0x11) return;
 
                 java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(data, 1, 4);
                 buffer.order(java.nio.ByteOrder.BIG_ENDIAN);
                 float receivedYaw = buffer.getFloat();
 
-                Log.d("BLE_DEBUG", "✅ [파싱 성공] 최종 변환된 Yaw 각도값: " + receivedYaw + "°");
-
                 if (dataCallback != null) {
                     dataCallback.onYawReceived(receivedYaw);
-                } else {
-                    Log.d("BLE_DEBUG", "⚠️ [콜백 인터셉트] dataCallback 인터페이스가 null 상태라 ViewModel로 값을 넘기지 못했습니다.");
                 }
             }
         }
@@ -297,9 +300,10 @@ public class BleManager {
 
     private void sendGuidePacket() {
         if (bluetoothGatt == null || writeCharacteristic == null) return;
+        if (!isGuidingRef) return;
 
         byte[] packet = new byte[5];
-        packet[0] = (byte) 0x22; // 헤더 지정
+        packet[0] = (byte) 0x22;
 
         int bits = Float.floatToIntBits(currentErrorRef);
         packet[1] = (byte) (bits >> 24);
