@@ -63,7 +63,7 @@ def run_segmentation(g_FRAME_OK, g_SEM_PROCESSING,g_ANGLE_OK, shared_queue):
         cv2.namedWindow("SEM Watcher", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("SEM Watcher", 320, 256)
 
-    YOLO_SEM_PATH = "models/Quantization_models/best_int8_freeze5.onnx"
+    YOLO_SEM_PATH = "/home/user15/work/project/VIP_WEARABLE/vip_wearable_rasi/models/Quantization_models/best_int8_freeze5.onnx"
     model = YOLO(YOLO_SEM_PATH, task="semantic")
     
     fps_calc = FPSCalculator(interval=1.0)

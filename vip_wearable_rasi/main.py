@@ -67,10 +67,14 @@ def main():
             # [핵심 1] 카메라는 항상 읽어줍니다. 읽지 않으면 버퍼에 과거 영상이 쌓여버립니다.
             ret, frame = cap.read()
             if not ret:
-                time.sleep(0.001)
+                camera_fail_count += 1
+                if camera_fail_count > 30: # 30프레임 연속 실패 시
+                    print("[main.py] 🚨 치명적 에러: 카메라 연결이 끊어졌습니다. 시스템을 종료합니다.")
+                    break # while 루프를 탈출하여 finally 블록으로 안전하게 이동
+                time.sleep(0.01)
                 continue
 
-            # [핵심 2] BLE가 연결되지 않았다면(대기 상태), AI로 이미지를 넘기지 않고 다시 위로 돌아갑니다.
+            # BLE가 연결되지 않았다면(대기 상태), AI로 이미지를 넘기지 않고 다시 위로 돌아갑니다.
             if not g.BLE_CONNECTED.value:
                 time.sleep(0.03) # 프레임 스킵을 위해 짧게 대기 (CPU/발열 절약)
                 is_first_frame = True # 나중에 연결되었을 때 즉시 영상을 쏘기 위해 초기화
