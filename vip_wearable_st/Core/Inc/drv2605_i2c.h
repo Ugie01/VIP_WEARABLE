@@ -26,7 +26,6 @@
 #define REG_FEEDBACK_CTRL       0x1A
 
 #define HAPTIC_MAX_INTENSITY    64   // 최대 진동 세기 제한 (0 ~ 127 범위 내에서 설정 가능)
-#define HAPTIC_UPDATE_PERIOD    50   // 햅틱 제어 주기 (단위: ms, 주기가 작을수록 실시간 반응성 향상)
 
 typedef struct {
 	I2C_HandleTypeDef *hi2c;

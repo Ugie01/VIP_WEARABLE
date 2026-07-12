@@ -29,7 +29,6 @@ HAL_StatusTypeDef DRV2605L_Init(I2C_HandleTypeDef *hi2c, DRV2605L_t *sensor) {
 	if (status != HAL_OK) {
 		return HAL_ERROR;
 	}
-
 	// 리셋 후 칩이 안정화될 때까지 짧은 대기 (최소 수 ms 필요)
 	HAL_Delay(20);
 
@@ -38,18 +37,21 @@ HAL_StatusTypeDef DRV2605L_Init(I2C_HandleTypeDef *hi2c, DRV2605L_t *sensor) {
 	if (status != HAL_OK) {
 		return HAL_ERROR;
 	}
+	HAL_Delay(20);
 
 	// 모터 기본 타입 설정 (REG_FEEDBACK_CTRL = 0x36, ERM 기본값)
 	status = DRV2605L_WriteRegister(sensor, REG_FEEDBACK_CTRL, 0x36);
 	if (status != HAL_OK) {
 		return HAL_ERROR;
 	}
+	HAL_Delay(20);
 
 	// 내장 라이브러리 선택 (REG_LIBRARY_SEL = 0x01, ERM 라이브러리 A)
 	status = DRV2605L_WriteRegister(sensor, REG_LIBRARY_SEL, 0x01);
 	if (status != HAL_OK) {
 		return HAL_ERROR;
 	}
+	HAL_Delay(20);
 
 	return HAL_OK;
 }
