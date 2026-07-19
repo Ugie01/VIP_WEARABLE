@@ -1,20 +1,25 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+# Built artifacts
 *.apk
 *.aar
-*.aab
-*.jks
-*.keystore
+*.jar
+*.bundle
+build/
+app/build/
+
+# IDEs and text editors
+.gradle/
+/local.properties
+/.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+
+# Log files
+*.log
+
+# Android Studio Navigation editor to not include local features as behaviors
+.navigation/
+
+# Captures and captures/ directory
+captures/
