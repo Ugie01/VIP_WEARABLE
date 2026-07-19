@@ -143,8 +143,8 @@ def force_kernel_advertising():
         subprocess.run(["sudo", "btmgmt", "--index", "0", "connectable", "on"], capture_output=True)
         subprocess.run(["sudo", "btmgmt", "--index", "0", "power", "on"], check=True, capture_output=True)
         subprocess.run(["sudo", "btmgmt", "--index", "0", "add-adv", "-u", "ffe0", "-c", "-n", "1"], check=True, capture_output=True)
-        subprocess.run(["sudo", "bluetoothctl", "system-alias", "VIP_Guide"], capture_output=True)
-        print("[ble_core.py] BLE 광고 송출 성공 (기기 이름: VIP_Guide)")
+        subprocess.run(["sudo", "bluetoothctl", "system-alias", "VIP_Wearable"], capture_output=True)
+        print("[ble_core.py] BLE 광고 송출 성공 (기기 이름: VIP_Wearable)")
     except Exception as e:
         print(f"[ble_core.py] BLE 광고 송출 실패: {e}")
 
