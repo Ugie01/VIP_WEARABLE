@@ -5,7 +5,7 @@
 * **Board:** Raspberry Pi 5 (4GB)
 * **OS:** Raspberry Pi OS (64-bit)
 * **Language:** Python 3.11+
-* **AI & Vision:** OpenCV, PyTorch, Ultralytics (YOLO26n / 세그멘테이션 모델 이름 추가), ONNXRuntime
+* **AI & Vision:** OpenCV, PyTorch, Ultralytics (YOLO26n / best_int8_freeze5.onnx(YOLO26n-sem Fine tuning)), ONNXRuntime
 * **Connectivity:** Bluetooth Low Energy (BlueZ / D-Bus), PySerial
 * **Concurrency:** Multiprocessing (Shared Memory, Queue, Value)
 
